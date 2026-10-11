@@ -111,10 +111,14 @@
 # line that lists the events (the pin and every cited read post), not the
 # category (Kama and Lume #forge cuts, 2026-10-08). It is not a gap.
 #
-# Narrowing: source.lines "A-B" selects lines A..B (1-based, inclusive) of
-# the file decoded as UTF-8 (bad bytes replaced), joined with "\n", with no
-# trailing newline, re-encoded as UTF-8. Draft form name: lines-utf8-nl
-# (§4.1 / §4.2). source.span is not applied.
+# Narrowing: source.lines "A-B" selects lines A..B (1-based, inclusive),
+# joined with "\n", with no trailing newline, encoded as UTF-8. Draft form
+# name: lines-utf8-nl (§4.1 / §4.2). Lines are split before anything is
+# decoded strictly (an invalid byte is never a line boundary), and only the
+# selected lines must be valid UTF-8: invalid UTF-8 in the range reads
+# UNREADABLE naming lines-utf8-nl, never replaced, and no other form's match
+# can turn it into OK. Invalid bytes outside the range don't affect the
+# verdict (Kama #forge cut, 2026-10-10). source.span is not applied.
 
 import argparse
 import hashlib
@@ -241,12 +245,28 @@ def current_set(receipts):
     return [r for r in receipts if r["id"] not in superseded], superseded, notes
 
 
+class InvalidUTF8InRange(ValueError):
+    """The selected lines are not valid UTF-8 under lines-utf8-nl (§4.1)."""
+
+
 def region_bytes(path: Path, lines_spec):
-    """Bytes under draft form lines-utf8-nl (§4.1). lines_spec required."""
+    """Bytes under draft form lines-utf8-nl (§4.1). lines_spec required.
+
+    surrogateescape keeps each invalid byte as itself (one escape code point,
+    never a line boundary), so lines split exactly as they would on valid
+    text and bytes outside the range can't move them. Encoding the selected
+    lines strictly then fails on any invalid byte inside the range: never
+    replaced (Kama #forge cut, 2026-10-10).
+    """
     data = path.read_bytes()
     start, _, end = str(lines_spec).partition("-")
     start, end = int(start), int(end or start)
-    selected = data.decode("utf-8", errors="replace").splitlines()[start - 1 : end]
+    selected = data.decode("utf-8", errors="surrogateescape").splitlines()[start - 1 : end]
+    for offset, line in enumerate(selected):
+        try:
+            line.encode("utf-8")
+        except UnicodeEncodeError:
+            raise InvalidUTF8InRange(start + offset) from None
     return "\n".join(selected).encode("utf-8")
 
 
@@ -315,7 +335,11 @@ def check_receipt(r, base: Path):
         return UNREADABLE, ("line-range hash has no named form (source.form_used / "
                             "non-default source.canonical); undeclared form (§4.2)")
 
-    hashed = bytes_under_form(target, named, src.get("lines"))
+    try:
+        hashed = bytes_under_form(target, named, src.get("lines"))
+    except InvalidUTF8InRange as e:
+        return UNREADABLE, (f"invalid UTF-8 at line {e.args[0]} inside {uri} lines {src['lines']} "
+                            f"under form {LINES_UTF8_NL!r}; bytes are never replaced (§4.1)")
     if hashed is None:
         return UNREADABLE, (f"named form {named!r} is not one this checker can reproduce "
                             f"(it has {', '.join(sorted(KNOWN_FORMS))})")
@@ -331,7 +355,10 @@ def check_receipt(r, base: Path):
         if actual != expected:
             # Match under another known form than the one named → UNREADABLE (§4.2).
             for alt in sorted(KNOWN_FORMS - {named}):
-                alt_bytes = bytes_under_form(target, alt, src.get("lines"))
+                try:
+                    alt_bytes = bytes_under_form(target, alt, src.get("lines"))
+                except InvalidUTF8InRange:
+                    continue
                 if alt_bytes is None:
                     continue
                 if hashlib.sha256(alt_bytes).hexdigest() == expected:

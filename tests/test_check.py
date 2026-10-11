@@ -48,6 +48,17 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def not_a_checkout(root):
+    """Why root is not a git checkout pin reads can be compared in, or None."""
+    if not shutil.which("git"):
+        return "not a git checkout (no git binary): pin reads can't be compared"
+    p = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+                       capture_output=True, text=True)
+    if p.returncode != 0 or Path(p.stdout.strip()).resolve() != Path(root).resolve():
+        return "not a git checkout (git rev-parse fails here): pin reads can't be compared"
+    return None
+
+
 class Example(unittest.TestCase):
     """Backward compatibility: the worked example gives the same verdicts as v0.1."""
 
@@ -132,6 +143,49 @@ class Gap2LineRangeHashing(unittest.TestCase):
         p = run([receipt("r-1", sha256=sha(RAW))])
         self.assertIn("[  OK   ] r-1", p.stdout)
         self.assertIn("form_used=raw-bytes", p.stdout)
+
+    # Kama #forge 2026-10-10: a line holding byte ff, hashed, then ff -> fe,
+    # still read OK under replacement. Invalid UTF-8 in the range is
+    # UNREADABLE, naming the form; never replaced.
+    FF = b"line one\nbad \xff here\nline three\n"
+    FE = b"line one\nbad \xfe here\nline three\n"
+    REPLACED = sha("bad \ufffd here".encode("utf-8"))
+
+    def test_kama_ff_to_fe_is_unreadable_not_ok(self):
+        p = run([receipt("r-1", lines="2", form_used="lines-utf8-nl", sha256=self.REPLACED)],
+                raw=self.FE)
+        self.assertIn("[UNREADABLE] r-1", p.stdout)
+        self.assertIn("invalid UTF-8 at line 2", p.stdout)
+        self.assertIn("'lines-utf8-nl'", p.stdout)
+        self.assertIn("never replaced", p.stdout)
+        self.assertNotIn("[  OK   ]", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_kama_original_ff_is_unreadable_too(self):
+        for digest in (self.REPLACED, sha(b"bad \xff here")):
+            p = run([receipt("r-1", lines="2", form_used="lines-utf8-nl", sha256=digest)],
+                    raw=self.FF)
+            self.assertIn("[UNREADABLE] r-1", p.stdout)
+            self.assertIn("'lines-utf8-nl'", p.stdout)
+            self.assertNotIn("[  OK   ]", p.stdout)
+
+    def test_invalid_range_is_unreadable_even_without_sha256(self):
+        p = run([receipt("r-1", lines="1-3", form_used="lines-utf8-nl")], raw=self.FF)
+        self.assertIn("[UNREADABLE] r-1", p.stdout)
+
+    def test_other_form_match_cannot_turn_invalid_range_into_ok(self):
+        # sha256 is the whole file's raw bytes; named form is lines-utf8-nl.
+        p = run([receipt("r-1", lines="1-3", form_used="lines-utf8-nl", sha256=sha(self.FF))],
+                raw=self.FF)
+        self.assertIn("[UNREADABLE] r-1", p.stdout)
+        self.assertIn("invalid UTF-8", p.stdout)
+        self.assertNotIn("[  OK   ]", p.stdout)
+
+    def test_invalid_bytes_outside_the_range_do_not_matter(self):
+        p = run([receipt("r-1", lines="3", form_used="lines-utf8-nl", sha256=sha(b"line three"))],
+                raw=self.FF)
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertIn("raw.txt lines 3", p.stdout)
 
 
 class Gap3Span(unittest.TestCase):
@@ -501,12 +555,20 @@ class Coverage(unittest.TestCase):
                                   capture_output=True, text=True)
 
     def test_repo_spec_covers_repo_decisions(self):
+        # Outside a git checkout (a tarball, or no git binary) the pin reads
+        # can't be compared, so the run correctly reads UNWITNESSED. That is
+        # not this test's question: skip and say why (Kama #forge 2026-10-10).
+        why = not_a_checkout(ROOT)
+        if why:
+            print(f"\nskipped test_repo_spec_covers_repo_decisions: {why}", file=sys.stderr)
+            self.skipTest(why)
         p = subprocess.run([sys.executable, str(CHECK), "--coverage",
                             str(ROOT / "SPEC.md"), str(ROOT / "DECISIONS.md"), "--pin", "565"],
                            capture_output=True, text=True)
         self.assertIn("coverage: 0 gap(s)", p.stdout)
         self.assertEqual(p.returncode, 0)
 
+    @unittest.skipUnless(shutil.which("git"), "git not installed: the fixture's pin read can't be compared, so it isn't counted")
     def test_complete_fixture_has_no_gap(self):
         p = self.cover()
         self.assertIn("pinned and closed in DECISIONS.md: 2", p.stdout)
@@ -570,6 +632,7 @@ class Coverage(unittest.TestCase):
         self.assertIn("[PIN DRIFT] D-003: in the pin set; not closed", p.stdout)
         self.assertEqual(p.returncode, 1)
 
+    @unittest.skipUnless(shutil.which("git"), "git not installed: the fixture's pin read can't be compared, so it isn't counted")
     def test_closed_after_pin_waits_unless_folded(self):
         late = SPEC.replace("D-001 through D-002", "D-001 through D-001")
         early = DECISIONS.replace("## D-002 ·", "## Open · D-002 ·")  # DECISIONS at the pin
@@ -583,6 +646,7 @@ class Coverage(unittest.TestCase):
         self.assertNotIn("[NOT CLOSED] D-002", p.stdout)
         self.assertEqual(p.returncode, 1)
 
+    @unittest.skipUnless(shutil.which("git"), "git not installed: the fixture's pin read can't be compared, so it isn't counted")
     def test_pin_read_line_is_listed(self):
         p = self.cover()
         self.assertIn("pin reads naming event 7: 1", p.stdout)
@@ -686,6 +750,7 @@ class CountedReads(unittest.TestCase):
 
     cover = PinReads.cover
 
+    @unittest.skipUnless(shutil.which("git"), "git not installed: the fixture's pin read can't be compared, so it isn't counted")
     def test_author_line_is_reported_not_counted(self):
         p = self.cover(spec=SPEC.replace(READ, READ + AUTHOR_READ))
         self.assertIn("pin reads naming event 7: 1 counted (8); 1 AUTHOR, 0 CLAIMED", p.stdout)
@@ -714,6 +779,7 @@ class CountedReads(unittest.TestCase):
         self.assertIn("[UNWITNESSED] pin quote", p.stdout)
         self.assertEqual(p.returncode, 1)
 
+    @unittest.skipUnless(shutil.which("git"), "git not installed: the fixture's pin read can't be compared, so it isn't counted")
     def test_line_with_no_own_post_is_claimed_not_counted(self):
         p = self.cover(spec=SPEC.replace(READ, READ + CLAIMED_READ))
         self.assertIn("1 counted (8); 0 AUTHOR, 1 CLAIMED, not counted", p.stdout)
@@ -728,6 +794,7 @@ class CountedReads(unittest.TestCase):
         self.assertIn("coverage: 1 gap(s)", p.stdout)
         self.assertEqual(p.returncode, 1)
 
+    @unittest.skipUnless(shutil.which("git"), "git not installed: the fixture's pin read can't be compared, so it isn't counted")
     def test_wrapped_author_marker_is_read(self):
         wrapped = "  - @b, event 9, 2026-08-10: pin 7 read against `abc1234`, 2\n    headings. AUTHOR.\n"
         p = self.cover(spec=SPEC.replace(READ, READ + wrapped))
@@ -749,6 +816,7 @@ class NotChecked(unittest.TestCase):
 
     cover = PinReads.cover
 
+    @unittest.skipUnless(shutil.which("git"), "git not installed: the fixture's pin read can't be compared, so it isn't counted")
     def test_lists_pin_and_read_events(self):
         p = self.cover(spec=SPEC.replace(READ, READ + AUTHOR_READ + CLAIMED_READ))
         self.assertIn("NOT CHECKED: authorship of 7, 8 (Pulse not readable)", p.stdout)
