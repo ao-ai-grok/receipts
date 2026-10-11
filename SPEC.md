@@ -209,14 +209,22 @@ not implement them.
 **Line-range bytes** (@grok draft). Neither v0.1 nor any decision says how
 `source.lines` selects bytes. So two checkers can disagree and both look
 conformant. This draft adopts the reference checker's existing rule, and
-no other: `source.lines` is `A-B` or `A`, 1-based and inclusive. The file
-is decoded as UTF-8 with unreadable bytes replaced. The selected lines are
-joined with `\n`, with no trailing newline, and re-encoded as UTF-8. That
-byte string is what `sha256` is compared to when `source.lines` is present.
-The draft name for that form is `lines-utf8-nl`. A line-range verdict MUST
-name the form it was hashed under (§4.2, `form_used`). Kama and Lume can
-cut this rule; until they do, checkers that implement `source.lines` use
-it and report that name.
+no other: `source.lines` is `A-B` or `A`, 1-based and inclusive. Lines
+are split before anything is decoded: an invalid UTF-8 byte is never a
+line boundary and never moves one, so invalid bytes outside the range do
+not change which bytes the range selects and do not affect the verdict.
+Only the selected lines are decoded, strictly. If any byte sequence in the
+selected lines is not valid UTF-8, the verdict is `UNREADABLE`, naming the
+form `lines-utf8-nl`; bytes are never replaced, so two different invalid
+bytes cannot hash the same. Otherwise the selected lines are joined with
+`\n`, with no trailing newline, and encoded as UTF-8. That byte string is
+what `sha256` is compared to when `source.lines` is present. (Line
+boundaries are the reference checker's: Python `str.splitlines` on the
+valid text.) The draft name for that form is `lines-utf8-nl`. A line-range
+verdict MUST name the form it was hashed under (§4.2, `form_used`). Kama
+and Lume can cut this rule; until they do, checkers that implement
+`source.lines` use it and report that name. (Never replaced: Kama,
+`#forge` 2026-10-10.)
 
 §4.2–§4.5 add requirements from closed decisions. They apply to every
 receipt unless the rule says when it applies.
@@ -400,7 +408,7 @@ A checker:
 | `CHANGED` | Source dereferenced but its content no longer matches `sha256`. The receipt pointed at something that has since moved. |
 | `MISSING` | Source cannot be dereferenced. A dangling receipt (§7). |
 | `DISPUTED` | A human mark, not a machine verdict. The source may be intact and the human judges the claim unsupported. A program MUST NOT compute it. If a receipt carries `disputed` as `true` or as a non-empty string (the human's reason), the checker reports that mark as written and does not judge the claim. `disputed: false` or an empty string is not a mark. (@grok draft) |
-| `UNREADABLE` | Source was dereferenced, but the declared / named form is not one this checker can reproduce under the name given; or a non-raw / line-range hash had no named form (`form_used`); or the hash matches only under a form other than the one named. Not `OK`. Draft name (§4.2; Kama `#forge` narrowing on `form_used`). |
+| `UNREADABLE` | Source was dereferenced, but the declared / named form is not one this checker can reproduce under the name given; or a non-raw / line-range hash had no named form (`form_used`); or the hash matches only under a form other than the one named; or the selected lines are not valid UTF-8 under `lines-utf8-nl` (§4.1). Not `OK`. Draft name (§4.2; Kama `#forge` narrowing on `form_used`). |
 | `UNFETCHED` | This checker did not fetch the source (a URL or a URN). Not `MISSING` (the source is not known to be gone) and not `UNREADABLE` (nothing was dereferenced). Draft name (§4.2). |
 
 A report "passes" nothing. There is no green light.
@@ -955,8 +963,10 @@ revision.
    among its layers; no decision orders the marks.
 6. **How a narrowed region is hashed.** Neither v0.1 nor any decision says
    how `source.lines` selects bytes. @grok's draft (§4.1) adopts the
-   reference checker's rule: UTF-8 with replacement, lines joined by a
-   newline, no trailing newline, under the draft form name `lines-utf8-nl`.
+   reference checker's rule: strict UTF-8 over the selected lines (invalid
+   bytes in the range read `UNREADABLE`, never replaced; Kama, `#forge`
+   2026-10-10), lines joined by a newline, no trailing newline, under the
+   draft form name `lines-utf8-nl`.
    Kama's `#forge` narrowing on `form_used` is folded into §4.2 (PR edit):
    a line-range / non-raw verdict MUST name the form hashed under; match
    under another form than the one named is `UNREADABLE`. `source.span`
@@ -1054,6 +1064,17 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
 - §12.8: records Kama's call (`#forge` 2026-10-06): `CLAIMED` quiet,
   counted, printed, split per claimant by trace agrees / disagrees;
   `UNWITNESSED` fails. Not folded.
+
+**v0.2-draft, lines-utf8-nl: never replaced**
+
+- §4.1 line-range bytes: the file was decoded with replacement, so a line
+  holding byte `ff`, hashed, still read `OK` after that byte became `fe`
+  (Kama, `#forge` 2026-10-10, tested). Now lines are split on bytes first
+  and only the selected range is decoded, strictly: invalid UTF-8 in the
+  range reads `UNREADABLE`, naming `lines-utf8-nl`, never replaced.
+  Invalid bytes outside the range don't affect the verdict and don't move
+  line boundaries. A hash that matches under another form can't turn it
+  into `OK` (§4.2). §5.1 `UNREADABLE` row and §12.6 updated to match.
 
 **v0.2-draft, pin reads: NOT COMPARED**
 
