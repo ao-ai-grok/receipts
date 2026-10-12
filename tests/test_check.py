@@ -181,6 +181,31 @@ class Gap2LineRangeHashing(unittest.TestCase):
         self.assertIn("invalid UTF-8", p.stdout)
         self.assertNotIn("[  OK   ]", p.stdout)
 
+    # Kama #forge 2026-10-10: split on 0a only. Lume #forge 2026-10-11:
+    # str.splitlines also breaks on 0b, 1c, 1d, 1e; keep the trailing 0d.
+    def test_only_0a_is_a_line_boundary(self):
+        raw = b"one\x0btwo\x1cthree\x1dfour\x1efive\x0csix\rseven\nlast\n"
+        p = run([receipt("r-1", lines="2", form_used="lines-utf8-nl", sha256=sha(b"last"))],
+                raw=raw)
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        p = run([receipt("r-1", lines="1", form_used="lines-utf8-nl",
+                         sha256=sha(raw.split(b"\n")[0]))], raw=raw)
+        self.assertIn("[  OK   ] r-1", p.stdout)
+
+    def test_crlf_to_lf_reads_changed(self):
+        crlf = b"line one\r\nline two\r\nline three\r\n"
+        digest = sha(b"line two\r")
+        p = run([receipt("r-1", lines="2", form_used="lines-utf8-nl", sha256=digest)], raw=crlf)
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        p = run([receipt("r-1", lines="2", form_used="lines-utf8-nl", sha256=digest)],
+                raw=crlf.replace(b"\r\n", b"\n"))
+        self.assertIn("[CHANGED] r-1", p.stdout)
+
+    def test_final_newline_does_not_add_an_empty_line(self):
+        p = run([receipt("r-1", lines="3-4", form_used="lines-utf8-nl",
+                         sha256=sha(b"line three\n"))], raw=b"a\nb\nline three\n")
+        self.assertNotIn("[  OK   ] r-1", p.stdout)
+
     def test_invalid_bytes_outside_the_range_do_not_matter(self):
         p = run([receipt("r-1", lines="3", form_used="lines-utf8-nl", sha256=sha(b"line three"))],
                 raw=self.FF)

@@ -113,8 +113,9 @@
 #
 # Narrowing: source.lines "A-B" selects lines A..B (1-based, inclusive),
 # joined with "\n", with no trailing newline, encoded as UTF-8. Draft form
-# name: lines-utf8-nl (§4.1 / §4.2). Lines are split before anything is
-# decoded strictly (an invalid byte is never a line boundary), and only the
+# name: lines-utf8-nl (§4.1 / §4.2). Lines split on byte 0a only, before
+# anything is decoded; a trailing 0d stays in its line, so endings are
+# witnessed (Kama 2026-10-10, Lume 2026-10-11 #forge cuts). Only the
 # selected lines must be valid UTF-8: invalid UTF-8 in the range reads
 # UNREADABLE naming lines-utf8-nl, never replaced, and no other form's match
 # can turn it into OK. Invalid bytes outside the range don't affect the
@@ -252,22 +253,27 @@ class InvalidUTF8InRange(ValueError):
 def region_bytes(path: Path, lines_spec):
     """Bytes under draft form lines-utf8-nl (§4.1). lines_spec required.
 
-    surrogateescape keeps each invalid byte as itself (one escape code point,
-    never a line boundary), so lines split exactly as they would on valid
-    text and bytes outside the range can't move them. Encoding the selected
-    lines strictly then fails on any invalid byte inside the range: never
-    replaced (Kama #forge cut, 2026-10-10).
+    Lines split on byte 0a only, before anything is decoded: no other byte
+    (0b, 0c, a lone 0d, 1c-1e, 85, U+2028/2029) is a boundary, and invalid
+    bytes outside the range can't move one (Kama #forge cut, 2026-10-10). A
+    trailing 0d stays in its line, so line endings are witnessed and CRLF to
+    LF reads CHANGED (Lume #forge pick, 2026-10-11). One final 0a ends the
+    last line and does not start an empty one. Only the selected lines are
+    decoded, strictly: invalid UTF-8 in the range is never replaced.
     """
     data = path.read_bytes()
     start, _, end = str(lines_spec).partition("-")
     start, end = int(start), int(end or start)
-    selected = data.decode("utf-8", errors="surrogateescape").splitlines()[start - 1 : end]
+    lines = data.split(b"\n")
+    if data.endswith(b"\n"):
+        lines.pop()
+    selected = lines[start - 1 : end]
     for offset, line in enumerate(selected):
         try:
-            line.encode("utf-8")
-        except UnicodeEncodeError:
+            line.decode("utf-8")
+        except UnicodeDecodeError:
             raise InvalidUTF8InRange(start + offset) from None
-    return "\n".join(selected).encode("utf-8")
+    return b"\n".join(selected)
 
 
 def bytes_under_form(path: Path, form, lines_spec):
