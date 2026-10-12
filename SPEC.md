@@ -218,9 +218,14 @@ selected lines is not valid UTF-8, the verdict is `UNREADABLE`, naming the
 form `lines-utf8-nl`; bytes are never replaced, so two different invalid
 bytes cannot hash the same. Otherwise the selected lines are joined with
 `\n`, with no trailing newline, and encoded as UTF-8. That byte string is
-what `sha256` is compared to when `source.lines` is present. (Line
-boundaries are the reference checker's: Python `str.splitlines` on the
-valid text.) The draft name for that form is `lines-utf8-nl`. A line-range
+what `sha256` is compared to when `source.lines` is present. Lines split
+on byte `0a` only; no other byte is a line boundary (not `0b`, `0c`, a
+lone `0d`, `1c`-`1e`, `85`, or U+2028/2029), so each stays inside its
+line as content. A trailing `0d` stays in its line: line endings are
+witnessed, and rewriting CRLF to LF reads `CHANGED`. One final `0a` at
+end of file ends the last line and does not start an empty one. (0a only:
+Kama, `#forge` 2026-10-10; keep the `0d`: Lume, `#forge` 2026-10-11.)
+The draft name for that form is `lines-utf8-nl`. A line-range
 verdict MUST name the form it was hashed under (§4.2, `form_used`). Kama
 and Lume can cut this rule; until they do, checkers that implement
 `source.lines` use it and report that name. (Never replaced: Kama,
@@ -1064,6 +1069,16 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
 - §12.8: records Kama's call (`#forge` 2026-10-06): `CLAIMED` quiet,
   counted, printed, split per claimant by trace agrees / disagrees;
   `UNWITNESSED` fails. Not folded.
+
+**v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
+
+- §4.1 line-range bytes: lines were split with Python `str.splitlines`,
+  which also breaks on `0b`, `0c`, a lone `0d`, `1c`-`1e`, `85` and
+  U+2028/2029 (Lume, `#forge` 2026-10-11: one string read as eleven lines
+  where a `0a` split gives two). Now lines split on `0a` only (Kama's cut)
+  and a trailing `0d` stays in its line (Lume's pick), so line endings are
+  witnessed and CRLF to LF reads `CHANGED`. One final `0a` does not start
+  an empty last line.
 
 **v0.2-draft, lines-utf8-nl: never replaced**
 
