@@ -198,29 +198,43 @@ def window_ok(value):
 
 
 def load_receipts(path: Path):
+    """Read a sidecar as bytes (§4 receipts-file cut).
+
+    Split on 0a only; each line decoded strictly as UTF-8; a decode or JSON
+    error names the line (Kama, #forge). A leading UTF-8 BOM is an error on
+    line 1, not stripped — the bytes are what's witnessed (Lume, #forge
+    2026-10-13). An empty middle line is an error that names the line; one
+    final 0a ends the last receipt and does not start an empty one.
+    """
     receipts, notes, seen = [], [], {}
-    with path.open() as f:
-        for n, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                r = json.loads(line)
-            except json.JSONDecodeError as e:
-                sys.exit(f"error: line {n} is not valid JSON: {e}")
-            for field in ("id", "claim", "source", "author", "date"):
-                if field not in r:
-                    sys.exit(f"error: receipt on line {n} missing required field '{field}'")
-            uri = r["source"].get("uri") if isinstance(r["source"], dict) else None
-            if not uri or not isinstance(uri, str):
-                sys.exit(f"error: receipt on line {n} missing required field 'source.uri'")
-            if r["id"] in seen:
-                sys.exit(f"error: receipt on line {n} reuses id '{r['id']}' from line {seen[r['id']]}")
-            seen[r["id"]] = n
-            if "review_by" in r and not ymd_ok(r["review_by"]):
-                sys.exit(f"error: receipt on line {n} has review_by {r['review_by']!r}, not a YYYY-MM-DD date")
-            notes += [f"{r['id']} (line {n}) {note}" for note in v02_notes(r)]
-            receipts.append(r)
+    data = path.read_bytes()
+    raw_lines = data.split(b"\n")
+    if data.endswith(b"\n"):
+        raw_lines.pop()
+    for n, raw in enumerate(raw_lines, 1):
+        if raw == b"":
+            sys.exit(f"error: line {n} is empty")
+        try:
+            line = raw.decode("utf-8")
+        except UnicodeDecodeError as e:
+            sys.exit(f"error: line {n} is not valid UTF-8: {e}")
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError as e:
+            sys.exit(f"error: line {n} is not valid JSON: {e}")
+        for field in ("id", "claim", "source", "author", "date"):
+            if field not in r:
+                sys.exit(f"error: receipt on line {n} missing required field '{field}'")
+        uri = r["source"].get("uri") if isinstance(r["source"], dict) else None
+        if not uri or not isinstance(uri, str):
+            sys.exit(f"error: receipt on line {n} missing required field 'source.uri'")
+        if r["id"] in seen:
+            sys.exit(f"error: receipt on line {n} reuses id '{r['id']}' from line {seen[r['id']]}")
+        seen[r["id"]] = n
+        if "review_by" in r and not ymd_ok(r["review_by"]):
+            sys.exit(f"error: receipt on line {n} has review_by {r['review_by']!r}, not a YYYY-MM-DD date")
+        notes += [f"{r['id']} (line {n}) {note}" for note in v02_notes(r)]
+        receipts.append(r)
     return receipts, notes
 
 

@@ -36,7 +36,9 @@ def run(receipts, *args, raw=RAW):
     with tempfile.TemporaryDirectory() as d:
         (Path(d) / "raw.txt").write_bytes(raw)
         sidecar = Path(d) / "report.md.receipts.jsonl"
-        if isinstance(receipts, str):
+        if isinstance(receipts, (bytes, bytearray)):
+            sidecar.write_bytes(bytes(receipts))
+        elif isinstance(receipts, str):
             sidecar.write_text(receipts)
         else:
             sidecar.write_text("".join(json.dumps(r) + "\n" for r in receipts))
@@ -211,6 +213,44 @@ class Gap2LineRangeHashing(unittest.TestCase):
                 raw=self.FF)
         self.assertIn("[  OK   ] r-1", p.stdout)
         self.assertIn("raw.txt lines 3", p.stdout)
+
+
+class SidecarReceiptsFile(unittest.TestCase):
+    """Kama receipts-file cut; Lume BOM / empty-middle-line picks (#forge 2026-10-13)."""
+
+    def _line(self):
+        return (json.dumps(receipt("r-1", sha256=sha(RAW))) + "\n").encode("utf-8")
+
+    def test_normal_sidecar_still_ok(self):
+        p = run([receipt("r-1", sha256=sha(RAW))])
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_leading_bom_errors_on_line_1(self):
+        # ef bb bf decodes to U+FEFF; json.loads rejects; bytes are witnessed.
+        body = b"\xef\xbb\xbf" + self._line()
+        p = run(body)
+        self.assertIn("error: line 1 is not valid JSON", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_empty_middle_line_errors_by_line(self):
+        line = self._line().rstrip(b"\n")
+        body = line + b"\n\n" + line + b"\n"
+        p = run(body)
+        self.assertIn("error: line 2 is empty", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_final_0a_does_not_start_an_empty_line(self):
+        p = run(self._line())  # ends with 0a
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_invalid_utf8_in_sidecar_names_the_line(self):
+        line = self._line().rstrip(b"\n")
+        body = line + b"\n" + b"bad \xff line\n"
+        p = run(body)
+        self.assertIn("error: line 2 is not valid UTF-8", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
 
 
 class Gap3Span(unittest.TestCase):
