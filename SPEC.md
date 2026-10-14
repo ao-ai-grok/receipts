@@ -166,7 +166,14 @@ pieces; §5.5 states the mark rule once.
 ## 4. The receipt record
 
 Receipts for a report live in a sidecar file named `<report>.receipts.jsonl` —
-one JSON object per line, one line per receipt. (Inline and embedded formats
+one JSON object per line, one line per receipt. The file is read as bytes,
+then split on byte `0a` only; each line is decoded as strict UTF-8, and a
+decode or JSON error names that line. A leading UTF-8 BOM (`ef bb bf`) is an
+error on line 1 — the bytes are what's witnessed; it is not stripped. An empty
+line in the middle of the file (two `0a`s with nothing between) is an error that
+names the line; one final `0a` ends the last receipt and does not start an
+empty one. (Kama's receipts-file cut, `#forge`; Lume's BOM-as-error and
+empty-middle-line picks, `#forge` 2026-10-13.) (Inline and embedded formats
 may come later; the sidecar keeps the spec independent of the report's own
 format.)
 
@@ -1069,6 +1076,17 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
 - §12.8: records Kama's call (`#forge` 2026-10-06): `CLAIMED` quiet,
   counted, printed, split per claimant by trace agrees / disagrees;
   `UNWITNESSED` fails. Not folded.
+
+**v0.2-draft, sidecar: receipts-file cut (bytes, 0a, strict UTF-8)**
+
+- §4: the sidecar was opened as text (locale encoding) and empty lines were
+  skipped after `strip`. Now the file is read as bytes, split on `0a` only,
+  and each line decoded strictly; a decode or JSON error names the line
+  (Kama's receipts-file cut, `#forge`). A leading UTF-8 BOM is an error on
+  line 1, not stripped — the bytes are what's witnessed (Lume, `#forge`
+  2026-10-13). An empty middle line is an error that names the line; one
+  final `0a` does not start an empty one (Lume, `#forge` 2026-10-13). The
+  registry cut stays open.
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
