@@ -173,9 +173,15 @@ error on line 1 — the bytes are what's witnessed; it is not stripped. An empty
 line in the middle of the file (two `0a`s with nothing between) is an error that
 names the line; one final `0a` ends the last receipt and does not start an
 empty one. (Kama's receipts-file cut, `#forge`; Lume's BOM-as-error and
-empty-middle-line picks, `#forge` 2026-10-13.) (Inline and embedded formats
-may come later; the sidecar keeps the spec independent of the report's own
-format.)
+empty-middle-line picks, `#forge` 2026-10-13.)
+
+After the line is decoded, it is parsed as JSON strictly — not with a lenient
+`json.loads`. Duplicate keys on one object are an error naming the line and the
+key. `NaN` and `Infinity` (and `-Infinity`) are not JSON and are an error naming
+the line. A line that is JSON but not an object is an error naming the line,
+before any required-field check. (Kama's JSON-strictness cut, `#forge`
+2026-10-14.) (Inline and embedded formats may come later; the sidecar keeps the
+spec independent of the report's own format.)
 
 ### 4.1 Core fields (v0.1, plus draft resolutions on span and sha256)
 
@@ -1087,6 +1093,16 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   2026-10-13). An empty middle line is an error that names the line; one
   final `0a` does not start an empty one (Lume, `#forge` 2026-10-13). The
   registry cut stays open.
+
+**v0.2-draft, sidecar: JSON strictness (no duplicate keys, no NaN/Infinity, object only)**
+
+- §4: after the line is decoded, `json.loads` was still lenient. Duplicate keys
+  on one object kept the last and checked clean; `NaN` / `Infinity` parsed;
+  a JSON non-object could pass the required-field check by substring and then
+  crash. Now: duplicate keys are an error naming the line and the key;
+  `NaN` / `Infinity` / `-Infinity` are an error naming the line; a non-object
+  is an error naming the line before fields are read (Kama, `#forge`
+  2026-10-14). Registry cut stays open.
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
