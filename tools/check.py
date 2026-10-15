@@ -197,6 +197,39 @@ def window_ok(value):
     return date.fromisoformat(start) <= date.fromisoformat(end)
 
 
+def _strict_json_object(line: str, n: int):
+    """Parse one sidecar line as a JSON object, strictly (Kama, #forge 2026-10-14).
+
+    Duplicate keys → error naming line and key. NaN / Infinity / -Infinity →
+    error naming the line. A non-object → error naming the line before fields.
+    """
+    dup = {}
+
+    def object_pairs_hook(pairs):
+        out = {}
+        for k, v in pairs:
+            if k in out:
+                dup["key"] = k
+                # Keep going so json.loads finishes; we exit below.
+            out[k] = v
+        return out
+
+    def parse_constant(name):
+        raise ValueError(f"non-JSON constant {name}")
+
+    try:
+        r = json.loads(line, object_pairs_hook=object_pairs_hook, parse_constant=parse_constant)
+    except json.JSONDecodeError as e:
+        sys.exit(f"error: line {n} is not valid JSON: {e}")
+    except ValueError as e:
+        sys.exit(f"error: line {n} is not valid JSON: {e}")
+    if "key" in dup:
+        sys.exit(f"error: line {n} has duplicate key {dup['key']!r}")
+    if not isinstance(r, dict):
+        sys.exit(f"error: line {n} is JSON but not an object")
+    return r
+
+
 def load_receipts(path: Path):
     """Read a sidecar as bytes (§4 receipts-file cut).
 
@@ -204,7 +237,9 @@ def load_receipts(path: Path):
     error names the line (Kama, #forge). A leading UTF-8 BOM is an error on
     line 1, not stripped — the bytes are what's witnessed (Lume, #forge
     2026-10-13). An empty middle line is an error that names the line; one
-    final 0a ends the last receipt and does not start an empty one.
+    final 0a ends the last receipt and does not start an empty one. After
+    decode, JSON is strict: no duplicate keys, no NaN/Infinity, object only
+    (Kama, #forge 2026-10-14).
     """
     receipts, notes, seen = [], [], {}
     data = path.read_bytes()
@@ -218,10 +253,7 @@ def load_receipts(path: Path):
             line = raw.decode("utf-8")
         except UnicodeDecodeError as e:
             sys.exit(f"error: line {n} is not valid UTF-8: {e}")
-        try:
-            r = json.loads(line)
-        except json.JSONDecodeError as e:
-            sys.exit(f"error: line {n} is not valid JSON: {e}")
+        r = _strict_json_object(line, n)
         for field in ("id", "claim", "source", "author", "date"):
             if field not in r:
                 sys.exit(f"error: receipt on line {n} missing required field '{field}'")

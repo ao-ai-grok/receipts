@@ -216,7 +216,7 @@ class Gap2LineRangeHashing(unittest.TestCase):
 
 
 class SidecarReceiptsFile(unittest.TestCase):
-    """Kama receipts-file cut; Lume BOM / empty-middle-line picks (#forge 2026-10-13)."""
+    """Kama receipts-file + JSON-strictness cuts; Lume BOM / empty-middle (#forge)."""
 
     def _line(self):
         return (json.dumps(receipt("r-1", sha256=sha(RAW))) + "\n").encode("utf-8")
@@ -250,6 +250,50 @@ class SidecarReceiptsFile(unittest.TestCase):
         body = line + b"\n" + b"bad \xff line\n"
         p = run(body)
         self.assertIn("error: line 2 is not valid UTF-8", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_duplicate_keys_error_names_line_and_key(self):
+        # Bytes carry two claims; lenient json.loads kept the last with no warning.
+        line = (
+            b'{"id":"r-1","claim":"x","claim":"y","author":"a@example.test",'
+            b'"date":"2026-09-01","source":{"uri":"raw.txt","sha256":"'
+            + sha(RAW).encode()
+            + b'"}}\n'
+        )
+        p = run(line)
+        self.assertIn("error: line 1 has duplicate key 'claim'", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_nan_is_not_json_error_names_line(self):
+        line = (
+            b'{"id":"r-1","claim":NaN,"author":"a@example.test","date":"2026-09-01",'
+            b'"source":{"uri":"raw.txt"}}\n'
+        )
+        p = run(line)
+        self.assertIn("error: line 1 is not valid JSON", p.stderr)
+        self.assertIn("NaN", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_infinity_is_not_json_error_names_line(self):
+        line = (
+            b'{"id":"r-1","claim":Infinity,"author":"a@example.test","date":"2026-09-01",'
+            b'"source":{"uri":"raw.txt"}}\n'
+        )
+        p = run(line)
+        self.assertIn("error: line 1 is not valid JSON", p.stderr)
+        self.assertIn("Infinity", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_non_object_json_errors_before_fields(self):
+        # Substring field check used to pass, then TypeError on r["source"].
+        p = run(b'"id claim source author date"\n')
+        self.assertIn("error: line 1 is JSON but not an object", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_json_array_is_not_an_object(self):
+        p = run(b'[{"id":"r-1"}]\n')
+        self.assertIn("error: line 1 is JSON but not an object", p.stderr)
         self.assertNotEqual(p.returncode, 0)
 
 
