@@ -173,14 +173,20 @@ error on line 1 — the bytes are what's witnessed; it is not stripped. An empty
 line in the middle of the file (two `0a`s with nothing between) is an error that
 names the line; one final `0a` ends the last receipt and does not start an
 empty one. (Kama's receipts-file cut, `#forge`; Lume's BOM-as-error and
-empty-middle-line picks, `#forge` 2026-10-13.)
+empty-middle-line picks, `#forge` 2026-10-13.) A `party_registry` file
+(§11.3) is read the same way: bytes, `0a` only, strict UTF-8, BOM an error
+on line 1, errors naming the line. (Kama's registry cut, `#forge`
+2026-10-12.)
 
 After the line is decoded, it is parsed as JSON strictly — not with a lenient
 `json.loads`. Duplicate keys on one object are an error naming the line and the
 key. `NaN` and `Infinity` (and `-Infinity`) are not JSON and are an error naming
 the line. A line that is JSON but not an object is an error naming the line,
 before any required-field check. (Kama's JSON-strictness cut, `#forge`
-2026-10-14.) (Inline and embedded formats may come later; the sidecar keeps the
+2026-10-14.) A line nested deeper than the checker's parser can read (say,
+200,000 `[`) is an error naming the line, not a crash. This draft fixes no
+depth number; a checker names the line where it stops. (Kama, `#forge`
+2026-10-15.) (Inline and embedded formats may come later; the sidecar keeps the
 spec independent of the report's own format.)
 
 ### 4.1 Core fields (v0.1, plus draft resolutions on span and sha256)
@@ -215,6 +221,13 @@ spec independent of the report's own format.)
 | `author` | yes | Who signs this receipt — the issuer. For agents: an identity that traces to a responsible operator. |
 | `date` | yes | ISO date the receipt was written. |
 | `supersedes` | no | The `id` of a receipt this one corrects. See §6. |
+
+**Field types.** `id`, `claim`, and `author` are JSON strings. `date` is a
+calendar date `YYYY-MM-DD` and nothing else (the same test as `review_by`,
+§7). `supersedes`, when present, is a string or null. Any other type is an
+error naming the line and the field, checked before ids are compared, so
+`1` and `"1"` are never two ids that print the same. Presence alone is not
+enough. (Kama, `#forge` 2026-10-16.)
 
 Unknown fields MUST be preserved by tools and ignored by checkers that do
 not implement them.
@@ -545,8 +558,16 @@ append-only, and dates can tie, so the line is the order a reader can check.
 id not in the file, names its own id, or names an id on a later line is
 invalid. The checker warns and ignores it: nothing is superseded by it,
 and the checker does not crash. Under `--strict` that warning is an error.
-A `supersedes` that is neither a string nor null is an error; the checker
-stops rather than guessing which id was meant.
+A `supersedes` that is neither a string nor null is an error naming the
+line (§4.1); the checker stops rather than guessing which id was meant.
+
+**Two corrections of one id fork** (Kama, `#forge` 2026-10-17). When two or
+more receipts supersede the same id and none of them is itself superseded,
+the checker does not pick one. The id is superseded; every correction
+stays current; the check-report prints `FORKED`, naming the id and the line
+of each current correction. Under `--strict` that is an error. To pick one,
+supersede the other correction: a correction that is itself superseded no
+longer counts toward the fork, so what is left is a chain.
 
 ## 7. Dangling receipts
 
@@ -771,7 +792,14 @@ error.
   a property of the readable guest list, not of the name alone. Draft field
   name: `party_registry` — a URI or path, on the read receipt, pointing at
   that list. Draft list shape: UTF-8 text, one party identifier per line
-  (empty lines ignored; `#` starts a comment). An identifier that does not
+  (empty lines ignored; `#` starts a comment). The registry is read as the
+  sidecar is (§4): as bytes, split on `0a` only, so a lone or trailing `0d`
+  stays in its line; each line is strict UTF-8; a leading BOM is an error on
+  line 1. An identifier is its line exactly. Nothing is stripped, and a line
+  that begins or ends with whitespace (a trailing `0d` included) is an error
+  naming the line. Any such error is a registry that cannot be read, and the
+  reason names the registry line. (Kama's registry cut, `#forge`
+  2026-10-12; whitespace-as-error is @grok draft.) An identifier that does not
   resolve in the named registry does not qualify as `witness`; the checker
   derives `UNWITNESSED`. The same registry SHOULD be what other party slots
   on the read (`subject`, `authorizer`, `reader`) are checked against when
@@ -1103,6 +1131,40 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   `NaN` / `Infinity` / `-Infinity` are an error naming the line; a non-object
   is an error naming the line before fields are read (Kama, `#forge`
   2026-10-14). Registry cut stays open.
+
+**v0.2-draft, party_registry read strictly**
+
+- §4 / §11.3: `party_registry` was read as text with replacement and split
+  with `str.splitlines`, then each line stripped. Now it is read as the
+  sidecar is: bytes, `0a` only, strict UTF-8, BOM an error on line 1, and an
+  identifier is its line exactly; edge whitespace (a trailing `0d` included)
+  is an error naming the line. A registry with such an error cannot be read,
+  so the witness does not resolve (Kama's registry cut, `#forge`
+  2026-10-12).
+
+**v0.2-draft, sidecar: nesting depth names the line**
+
+- §4: a line of 200,000 `[` ended in a `RecursionError` traceback. Now a
+  line nested past the parser's depth is an error naming the line (Kama,
+  `#forge` 2026-10-15). No depth number is fixed.
+
+**v0.2-draft, sidecar: core field types**
+
+- §4.1: required fields were checked for presence, not type. `"id":["a"]`
+  crashed (unhashable); `"id":1` and `"id":"1"` passed as unique and both
+  printed as 1; `"claim":null`, `"author":42`, `"date":"yesterday"` passed
+  clean. Now `id`, `claim`, `author` must be strings and `date` a
+  `YYYY-MM-DD` date, else an error naming the line and the field (Kama,
+  `#forge` 2026-10-16). `supersedes` is checked the same way, by line (§6).
+
+**v0.2-draft, §6: supersede forks are named**
+
+- §6: two receipts could both supersede one id (b on line 2 and c on line 3
+  both naming a). a dropped out, b and c were both current and both `OK`,
+  with no note. Now that is `FORKED`, naming the id and both lines, and an
+  error under `--strict`; both corrections stay current and neither is
+  picked. Superseding one of them leaves a chain and clears the fork
+  (Kama, `#forge` 2026-10-17).
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
