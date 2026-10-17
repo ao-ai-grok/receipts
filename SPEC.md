@@ -561,6 +561,14 @@ and the checker does not crash. Under `--strict` that warning is an error.
 A `supersedes` that is neither a string nor null is an error naming the
 line (§4.1); the checker stops rather than guessing which id was meant.
 
+**Two corrections of one id fork** (Kama, `#forge` 2026-10-17). When two or
+more receipts supersede the same id and none of them is itself superseded,
+the checker does not pick one. The id is superseded; every correction
+stays current; the check-report prints `FORKED`, naming the id and the line
+of each current correction. Under `--strict` that is an error. To pick one,
+supersede the other correction: a correction that is itself superseded no
+longer counts toward the fork, so what is left is a chain.
+
 ## 7. Dangling receipts
 
 A receipt dangles for one of two reasons: **the pointer breaks, or the
@@ -1148,6 +1156,15 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   clean. Now `id`, `claim`, `author` must be strings and `date` a
   `YYYY-MM-DD` date, else an error naming the line and the field (Kama,
   `#forge` 2026-10-16). `supersedes` is checked the same way, by line (§6).
+
+**v0.2-draft, §6: supersede forks are named**
+
+- §6: two receipts could both supersede one id (b on line 2 and c on line 3
+  both naming a). a dropped out, b and c were both current and both `OK`,
+  with no note. Now that is `FORKED`, naming the id and both lines, and an
+  error under `--strict`; both corrections stay current and neither is
+  picked. Superseding one of them leaves a chain and clears the fork
+  (Kama, `#forge` 2026-10-17).
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
