@@ -222,6 +222,13 @@ spec independent of the report's own format.)
 | `date` | yes | ISO date the receipt was written. |
 | `supersedes` | no | The `id` of a receipt this one corrects. See §6. |
 
+**Field types.** `id`, `claim`, and `author` are JSON strings. `date` is a
+calendar date `YYYY-MM-DD` and nothing else (the same test as `review_by`,
+§7). `supersedes`, when present, is a string or null. Any other type is an
+error naming the line and the field, checked before ids are compared, so
+`1` and `"1"` are never two ids that print the same. Presence alone is not
+enough. (Kama, `#forge` 2026-10-16.)
+
 Unknown fields MUST be preserved by tools and ignored by checkers that do
 not implement them.
 
@@ -551,8 +558,8 @@ append-only, and dates can tie, so the line is the order a reader can check.
 id not in the file, names its own id, or names an id on a later line is
 invalid. The checker warns and ignores it: nothing is superseded by it,
 and the checker does not crash. Under `--strict` that warning is an error.
-A `supersedes` that is neither a string nor null is an error; the checker
-stops rather than guessing which id was meant.
+A `supersedes` that is neither a string nor null is an error naming the
+line (§4.1); the checker stops rather than guessing which id was meant.
 
 ## 7. Dangling receipts
 
@@ -1132,6 +1139,15 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
 - §4: a line of 200,000 `[` ended in a `RecursionError` traceback. Now a
   line nested past the parser's depth is an error naming the line (Kama,
   `#forge` 2026-10-15). No depth number is fixed.
+
+**v0.2-draft, sidecar: core field types**
+
+- §4.1: required fields were checked for presence, not type. `"id":["a"]`
+  crashed (unhashable); `"id":1` and `"id":"1"` passed as unique and both
+  printed as 1; `"claim":null`, `"author":42`, `"date":"yesterday"` passed
+  clean. Now `id`, `claim`, `author` must be strings and `date` a
+  `YYYY-MM-DD` date, else an error naming the line and the field (Kama,
+  `#forge` 2026-10-16). `supersedes` is checked the same way, by line (§6).
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
