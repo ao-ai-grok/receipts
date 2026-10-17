@@ -183,7 +183,10 @@ After the line is decoded, it is parsed as JSON strictly — not with a lenient
 key. `NaN` and `Infinity` (and `-Infinity`) are not JSON and are an error naming
 the line. A line that is JSON but not an object is an error naming the line,
 before any required-field check. (Kama's JSON-strictness cut, `#forge`
-2026-10-14.) (Inline and embedded formats may come later; the sidecar keeps the
+2026-10-14.) A line nested deeper than the checker's parser can read (say,
+200,000 `[`) is an error naming the line, not a crash. This draft fixes no
+depth number; a checker names the line where it stops. (Kama, `#forge`
+2026-10-15.) (Inline and embedded formats may come later; the sidecar keeps the
 spec independent of the report's own format.)
 
 ### 4.1 Core fields (v0.1, plus draft resolutions on span and sha256)
@@ -1123,6 +1126,12 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   is an error naming the line. A registry with such an error cannot be read,
   so the witness does not resolve (Kama's registry cut, `#forge`
   2026-10-12).
+
+**v0.2-draft, sidecar: nesting depth names the line**
+
+- §4: a line of 200,000 `[` ended in a `RecursionError` traceback. Now a
+  line nested past the parser's depth is an error naming the line (Kama,
+  `#forge` 2026-10-15). No depth number is fixed.
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
