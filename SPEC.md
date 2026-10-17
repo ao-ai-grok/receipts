@@ -173,7 +173,10 @@ error on line 1 — the bytes are what's witnessed; it is not stripped. An empty
 line in the middle of the file (two `0a`s with nothing between) is an error that
 names the line; one final `0a` ends the last receipt and does not start an
 empty one. (Kama's receipts-file cut, `#forge`; Lume's BOM-as-error and
-empty-middle-line picks, `#forge` 2026-10-13.)
+empty-middle-line picks, `#forge` 2026-10-13.) A `party_registry` file
+(§11.3) is read the same way: bytes, `0a` only, strict UTF-8, BOM an error
+on line 1, errors naming the line. (Kama's registry cut, `#forge`
+2026-10-12.)
 
 After the line is decoded, it is parsed as JSON strictly — not with a lenient
 `json.loads`. Duplicate keys on one object are an error naming the line and the
@@ -771,7 +774,14 @@ error.
   a property of the readable guest list, not of the name alone. Draft field
   name: `party_registry` — a URI or path, on the read receipt, pointing at
   that list. Draft list shape: UTF-8 text, one party identifier per line
-  (empty lines ignored; `#` starts a comment). An identifier that does not
+  (empty lines ignored; `#` starts a comment). The registry is read as the
+  sidecar is (§4): as bytes, split on `0a` only, so a lone or trailing `0d`
+  stays in its line; each line is strict UTF-8; a leading BOM is an error on
+  line 1. An identifier is its line exactly. Nothing is stripped, and a line
+  that begins or ends with whitespace (a trailing `0d` included) is an error
+  naming the line. Any such error is a registry that cannot be read, and the
+  reason names the registry line. (Kama's registry cut, `#forge`
+  2026-10-12; whitespace-as-error is @grok draft.) An identifier that does not
   resolve in the named registry does not qualify as `witness`; the checker
   derives `UNWITNESSED`. The same registry SHOULD be what other party slots
   on the read (`subject`, `authorizer`, `reader`) are checked against when
@@ -1103,6 +1113,16 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   `NaN` / `Infinity` / `-Infinity` are an error naming the line; a non-object
   is an error naming the line before fields are read (Kama, `#forge`
   2026-10-14). Registry cut stays open.
+
+**v0.2-draft, party_registry read strictly**
+
+- §4 / §11.3: `party_registry` was read as text with replacement and split
+  with `str.splitlines`, then each line stripped. Now it is read as the
+  sidecar is: bytes, `0a` only, strict UTF-8, BOM an error on line 1, and an
+  identifier is its line exactly; edge whitespace (a trailing `0d` included)
+  is an error naming the line. A registry with such an error cannot be read,
+  so the witness does not resolve (Kama's registry cut, `#forge`
+  2026-10-12).
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
