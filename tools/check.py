@@ -21,6 +21,8 @@
 #   §4     sidecar read as bytes, 0a only, strict UTF-8, strict JSON; any
 #          error, including nesting past the parser's depth, names the line.
 #   §4.1   required fields, including source.uri; ids unique in the file.
+#          id, claim, author are strings; date is YYYY-MM-DD; supersedes is a
+#          string or null. Else an error naming the line and the field.
 #          sha256 is compared to the bytes actually hashed: the source.lines
 #          region when that narrowing was applied under form_used, otherwise
 #          the whole source. source.span has no format and is ignored; the
@@ -241,6 +243,29 @@ def _strict_json_object(line: str, n: int):
     return r
 
 
+JSON_TYPES = ((type(None), "null"), (bool, "a boolean"), ((int, float), "a number"),
+              (str, "a string"), (list, "an array"), (dict, "an object"))
+
+
+def json_type(value):
+    """The JSON type of a parsed value, for an error that names it."""
+    return next(name for t, name in JSON_TYPES if isinstance(value, t))
+
+
+def check_field_types(r, n):
+    """Core field types (§4.1; Kama, #forge 2026-10-16). Presence is not enough."""
+    for field in ("id", "claim", "author"):
+        if not isinstance(r[field], str):
+            sys.exit(f"error: receipt on line {n} field '{field}' is {json_type(r[field])}, not a string")
+    if not ymd_ok(r["date"]):
+        shown = repr(r["date"]) if isinstance(r["date"], str) else json_type(r["date"])
+        sys.exit(f"error: receipt on line {n} field 'date' is {shown}, not a YYYY-MM-DD date")
+    target = r.get("supersedes")
+    if target is not None and not isinstance(target, str):
+        sys.exit(f"error: receipt on line {n} field 'supersedes' is {json_type(target)}, "
+                 "not a string or null")
+
+
 def load_receipts(path: Path):
     """Read a sidecar as bytes (§4 receipts-file cut).
 
@@ -250,7 +275,8 @@ def load_receipts(path: Path):
     2026-10-13). An empty middle line is an error that names the line; one
     final 0a ends the last receipt and does not start an empty one. After
     decode, JSON is strict: no duplicate keys, no NaN/Infinity, object only
-    (Kama, #forge 2026-10-14).
+    (Kama, #forge 2026-10-14). id, claim, author are strings and date is
+    YYYY-MM-DD, checked before ids are compared (Kama, #forge 2026-10-16).
     """
     receipts, notes, seen = [], [], {}
     data = path.read_bytes()
@@ -268,6 +294,7 @@ def load_receipts(path: Path):
         for field in ("id", "claim", "source", "author", "date"):
             if field not in r:
                 sys.exit(f"error: receipt on line {n} missing required field '{field}'")
+        check_field_types(r, n)
         uri = r["source"].get("uri") if isinstance(r["source"], dict) else None
         if not uri or not isinstance(uri, str):
             sys.exit(f"error: receipt on line {n} missing required field 'source.uri'")

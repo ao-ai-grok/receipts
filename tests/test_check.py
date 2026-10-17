@@ -318,6 +318,55 @@ class SidecarReceiptsFile(unittest.TestCase):
         self.assertNotIn("Traceback", p.stderr)
 
 
+class CoreFieldTypes(unittest.TestCase):
+    """Kama #forge 2026-10-16: presence was checked, type wasn't (§4.1)."""
+
+    def test_id_list_names_line_and_field_not_a_traceback(self):
+        p = run([{**receipt("r-1"), "id": ["a"]}])  # was TypeError: unhashable
+        self.assertIn("error: receipt on line 1 field 'id' is an array, not a string", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_id_1_and_id_string_1_are_not_two_ids(self):
+        # Both passed as unique and printed as 1.
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "id": 1},
+                 {**receipt("r-2", sha256=sha(RAW)), "id": "1"}])
+        self.assertIn("error: receipt on line 1 field 'id' is a number, not a string", p.stderr)
+        self.assertNotIn("[  OK   ]", p.stdout)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_claim_null(self):
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "claim": None}])
+        self.assertIn("error: receipt on line 1 field 'claim' is null, not a string", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_author_42(self):
+        p = run([receipt("r-1", sha256=sha(RAW)), {**receipt("r-2", sha256=sha(RAW)), "author": 42}])
+        self.assertIn("error: receipt on line 2 field 'author' is a number, not a string", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_date_yesterday(self):
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "date": "yesterday"}])
+        self.assertIn("error: receipt on line 1 field 'date' is 'yesterday', not a YYYY-MM-DD date",
+                      p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_date_not_a_string(self):
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "date": 20260901}])
+        self.assertIn("error: receipt on line 1 field 'date' is a number, not a YYYY-MM-DD date", p.stderr)
+
+    def test_supersedes_not_a_string_names_the_line(self):
+        p = run([receipt("r-1"), {**receipt("r-2"), "supersedes": ["r-1"]}])
+        self.assertIn("error: receipt on line 2 field 'supersedes' is an array, not a string or null",
+                      p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_well_typed_receipt_still_ok(self):
+        p = run([receipt("r-1", sha256=sha(RAW))], "--strict")
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+
 class Gap3Span(unittest.TestCase):
     def test_span_is_not_applied_and_says_so(self):
         p = run([receipt("r-1", span="5-12", sha256=sha(RAW))])
