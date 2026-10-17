@@ -449,6 +449,49 @@ class Gap6IdsAndSupersedes(unittest.TestCase):
         self.assertNotEqual(p.returncode, 0)
 
 
+class SupersedeForks(unittest.TestCase):
+    """Kama #forge 2026-10-17: two receipts superseding one id are named, not resolved."""
+
+    def fork(self, *extra):
+        a = {**receipt("a", sha256=sha(RAW)), "claim": "x is 1"}
+        b = {**receipt("b", "a", sha256=sha(RAW)), "claim": "x is 2"}
+        c = {**receipt("c", "a", sha256=sha(RAW)), "claim": "x is 3"}
+        return [a, b, c, *extra]
+
+    def test_kama_a_b_c_is_forked_both_current(self):
+        p = run(self.fork())
+        line = "FORKED: a (line 1) is superseded by b (line 2) and c (line 3); both stay current"
+        self.assertIn("  [FORKED] a (line 1) is superseded by b (line 2) and c (line 3)", p.stdout)
+        self.assertIn("warning: " + line, p.stderr)
+        self.assertIn("3 receipts, 1 superseded, sampling 2", p.stdout)
+        self.assertIn("[  OK   ] b: x is 2", p.stdout)
+        self.assertIn("[  OK   ] c: x is 3", p.stdout)
+        self.assertNotIn("] a:", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_kama_a_b_c_is_an_error_under_strict(self):
+        p = run(self.fork(), "--strict")
+        self.assertIn("error: FORKED: a (line 1) is superseded by b (line 2) and c (line 3)", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_superseding_the_other_correction_makes_a_chain(self):
+        d = {**receipt("d", "c", sha256=sha(RAW)), "claim": "c withdrawn; x is 2"}
+        p = run(self.fork(d), "--strict")
+        self.assertNotIn("FORKED", p.stdout + p.stderr)
+        self.assertIn("4 receipts, 2 superseded, sampling 2", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_three_way_fork_names_every_line(self):
+        e = {**receipt("e", "a", sha256=sha(RAW)), "claim": "x is 4"}
+        p = run(self.fork(e))
+        self.assertIn("by b (line 2) and c (line 3) and e (line 4); all stay current", p.stdout)
+
+    def test_single_correction_is_not_a_fork(self):
+        p = run(self.fork()[:2], "--strict")
+        self.assertNotIn("FORKED", p.stdout + p.stderr)
+        self.assertEqual(p.returncode, 0)
+
+
 class Gap7Sampling(unittest.TestCase):
     RECEIPTS = [receipt(f"r-{i}") for i in range(10)]
 

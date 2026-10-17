@@ -45,7 +45,10 @@
 #   §6     a receipt supersedes only a receipt on an earlier line ("later"
 #          is file order, not the date field). A supersedes that names nothing
 #          in the file, itself, or a later line is warned and ignored (an
-#          error under --strict). It does not supersede.
+#          error under --strict). It does not supersede. Two or more current
+#          receipts superseding one id: FORKED, naming the id and each line;
+#          all stay current, none is picked; an error under --strict (Kama
+#          #forge 2026-10-17). A superseded correction does not count: a chain.
 #   §7     review_by is YYYY-MM-DD. STALE once --today is strictly after that
 #          date and no later receipt supersedes it (the only "review recorded"
 #          this tool can see). It does not check that review_conditions were
@@ -309,9 +312,15 @@ def load_receipts(path: Path):
 
 
 def current_set(receipts):
-    """Receipts not superseded by any later receipt (SPEC §6)."""
+    """Receipts not superseded by any later receipt (SPEC §6).
+
+    Returns (current, superseded, notes, forks). A fork is an id that two or
+    more current receipts supersede (Kama, #forge 2026-10-17): named, not
+    resolved. Every line of the sidecar is one receipt, so line = index + 1.
+    """
     ids = {r["id"] for r in receipts}
-    earlier, superseded, notes = set(), set(), []
+    line = {r["id"]: n for n, r in enumerate(receipts, 1)}
+    earlier, superseded, notes, by = set(), set(), [], {}
     for r in receipts:
         target = r.get("supersedes")
         if target is None:
@@ -320,6 +329,7 @@ def current_set(receipts):
             sys.exit(f"error: {r['id']} supersedes {target!r}; expected one id or null")
         elif target in earlier:
             superseded.add(target)
+            by.setdefault(target, []).append(r["id"])
         elif target == r["id"]:
             notes.append(f"{r['id']} supersedes itself; ignored")
         elif target in ids:
@@ -327,7 +337,17 @@ def current_set(receipts):
         else:
             notes.append(f"{r['id']} supersedes {target}, which is not in this file (dangling supersedes)")
         earlier.add(r["id"])
-    return [r for r in receipts if r["id"] not in superseded], superseded, notes
+    forks = []
+    for target, corrections in by.items():
+        live = [c for c in corrections if c not in superseded]  # superseded: a chain, not a fork
+        if len(live) > 1:
+            names = " and ".join(f"{c} (line {line[c]})" for c in live)
+            stay = ("both stay current, neither is picked" if len(live) == 2 else
+                    "all stay current, none is picked")
+            forks.append(f"{target} (line {line[target]}) is superseded by {names}; {stay}; "
+                         "supersede the others to pick one (§6)")
+    notes += [f"FORKED: {f}" for f in forks]
+    return [r for r in receipts if r["id"] not in superseded], superseded, notes, forks
 
 
 class InvalidUTF8InRange(ValueError):
@@ -791,7 +811,7 @@ def main():
 
     receipts, notes = load_receipts(args.receipts_file)
     base = args.receipts_file.resolve().parent
-    current, superseded, supersede_notes = current_set(receipts)
+    current, superseded, supersede_notes, forks = current_set(receipts)
     notes += supersede_notes
     for note in notes:
         print(f"{'error' if args.strict else 'warning'}: {note}", file=sys.stderr)
@@ -815,6 +835,8 @@ def main():
     sidecar = hashlib.sha256(args.receipts_file.read_bytes()).hexdigest()
     print(f"receipts check — {args.receipts_file.name}")
     print(f"  {len(receipts)} receipts, {len(superseded)} superseded, sampling {len(pool)}")
+    for fork in forks:
+        print(f"  [FORKED] {fork}")
     print(f"  sample: {how}")
     print(f"  from: sidecar sha256 {sidecar}")
     print(f"  checked: {args.today}, by tools/check.py (SPEC v0.2-draft subset; see its header)")
