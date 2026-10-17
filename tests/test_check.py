@@ -296,6 +296,27 @@ class SidecarReceiptsFile(unittest.TestCase):
         self.assertIn("error: line 1 is JSON but not an object", p.stderr)
         self.assertNotEqual(p.returncode, 0)
 
+    # Kama #forge 2026-10-15: a line of 200,000 '[' was a RecursionError traceback.
+    def test_200000_brackets_name_the_line(self):
+        p = run(self._line() + b"[" * 200_000 + b"\n")
+        self.assertIn("error: line 2 is nested deeper than this checker's JSON parser reads", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertNotIn("RecursionError", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_deep_value_inside_a_receipt_names_the_line(self):
+        deep = b"[" * 200_000 + b"]" * 200_000
+        line = b'{"id":"r-1","claim":"x","author":"a","date":"2026-09-01","source":{"uri":"raw.txt"},"x":' + deep + b"}\n"
+        p = run(line)
+        self.assertIn("error: line 1 is nested deeper", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_deep_objects_name_the_line(self):
+        p = run(b'{"a":' * 200_000 + b"\n")
+        self.assertIn("error: line 1 is nested deeper", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+
 
 class Gap3Span(unittest.TestCase):
     def test_span_is_not_applied_and_says_so(self):

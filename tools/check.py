@@ -18,6 +18,8 @@
 # failure: non-zero exit and a diagnostic line, not a pass.
 #
 # What this checker implements of SPEC v0.2-draft (§9 asks a tool to say):
+#   §4     sidecar read as bytes, 0a only, strict UTF-8, strict JSON; any
+#          error, including nesting past the parser's depth, names the line.
 #   §4.1   required fields, including source.uri; ids unique in the file.
 #          sha256 is compared to the bytes actually hashed: the source.lines
 #          region when that narrowing was applied under form_used, otherwise
@@ -206,6 +208,7 @@ def _strict_json_object(line: str, n: int):
 
     Duplicate keys → error naming line and key. NaN / Infinity / -Infinity →
     error naming the line. A non-object → error naming the line before fields.
+    Nesting past the parser's depth → error naming the line (Kama, 2026-10-15).
     """
     dup = {}
 
@@ -227,6 +230,10 @@ def _strict_json_object(line: str, n: int):
         sys.exit(f"error: line {n} is not valid JSON: {e}")
     except ValueError as e:
         sys.exit(f"error: line {n} is not valid JSON: {e}")
+    except RecursionError:
+        # Kama #forge 2026-10-15: 200,000 '[' was a traceback. No depth
+        # number is fixed (§4); this names the line where the parser stops.
+        sys.exit(f"error: line {n} is nested deeper than this checker's JSON parser reads")
     if "key" in dup:
         sys.exit(f"error: line {n} has duplicate key {dup['key']!r}")
     if not isinstance(r, dict):
