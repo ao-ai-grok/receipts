@@ -515,6 +515,62 @@ class RegistryBoundWitness(unittest.TestCase):
         self.assertEqual(p.returncode, 0)
 
 
+class RegistryReadStrictly(unittest.TestCase):
+    """Kama registry cut (#forge 2026-10-12): party_registry is read as the
+    sidecar is — bytes, 0a only, strict UTF-8, BOM an error, by line."""
+
+    def check(self, guests: bytes, witness="w-hand"):
+        r = {**receipt("r-1"), "kind": "read", "subject": "s", "authorizer": "a",
+             "reader": "r", "window": "2026-09-01/2026-09-30",
+             "party_registry": "guests.txt", "witness": witness}
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "raw.txt").write_bytes(RAW)
+            (Path(d) / "guests.txt").write_bytes(guests)
+            sidecar = Path(d) / "report.md.receipts.jsonl"
+            sidecar.write_text(json.dumps(r) + "\n")
+            return subprocess.run([sys.executable, str(CHECK), str(sidecar), "--today", "2026-09-27"],
+                                  capture_output=True, text=True)
+
+    def test_clean_registry_resolves(self):
+        p = self.check(b"# guests\ns\n\na\nr\nw-hand")  # comment, empty line, no final 0a
+        self.assertNotIn("UNWITNESSED", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_invalid_utf8_names_the_registry_line(self):
+        # errors="replace" read this clean: w-hand on line 3 still resolved.
+        p = self.check(b"a\nbad \xff\nw-hand\n")
+        self.assertIn("[UNWITNESSED] r-1", p.stdout)
+        self.assertIn("party_registry 'guests.txt' line 2 is not valid UTF-8", p.stdout)
+        self.assertIn("cannot be read", p.stdout)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertEqual(p.returncode, 1)
+
+    def test_leading_bom_errors_on_line_1(self):
+        # The BOM rode along on the comment line, so w-hand resolved before.
+        p = self.check(b"\xef\xbb\xbf# guests\nw-hand\n")
+        self.assertIn("[UNWITNESSED] r-1", p.stdout)
+        self.assertIn("line 1 starts with a UTF-8 BOM", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_lone_0d_is_not_a_line_boundary(self):
+        # str.splitlines split this into four ids, so w-hand resolved before.
+        p = self.check(b"s\ra\rr\rw-hand\n")
+        self.assertIn("[UNWITNESSED] r-1", p.stdout)
+        self.assertIn("witness 'w-hand' does not resolve in party_registry", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_trailing_0d_stays_in_its_line_and_names_it(self):
+        p = self.check(b"a\r\nw-hand\r\n")
+        self.assertIn("[UNWITNESSED] r-1", p.stdout)
+        self.assertIn("line 1 begins or ends with whitespace ('a\\r')", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_edge_whitespace_is_not_stripped(self):
+        p = self.check(b"a\n w-hand\n")
+        self.assertIn("line 2 begins or ends with whitespace (' w-hand')", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+
 class Gap10NewRequiredFields(unittest.TestCase):
     def test_missing_v02_fields_warn_by_default(self):
         p = run([receipt("r-1", v02=False, sha256=sha(RAW))])

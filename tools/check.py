@@ -53,6 +53,10 @@
 #          is the reader or the authorizer, or (when party_registry is set)
 #          does not resolve in that registry. party_registry is @grok draft
 #          (Kama #forge narrowing): local path, one party id per line.
+#          The registry is read as the sidecar is (bytes, 0a only, strict
+#          UTF-8, BOM an error, Kama registry cut 2026-10-12); an id is its
+#          line exactly, and edge whitespace (a trailing 0d too) is an error
+#          naming the line. Any such error: registry cannot be read.
 #          Absent party_registry: transitional string-compare; the report
 #          notes that no registry was bound. window is YYYY-MM-DD/YYYY-MM-DD
 #          and is not checked against a time. subject does not make a receipt
@@ -355,7 +359,11 @@ def named_hash_form(src):
 
 
 def load_party_registry(base: Path, uri):
-    """Load party_registry (§11.3). Local path only; one id per line."""
+    """Load party_registry (§11.3). Local path only; one id per line.
+
+    Returns (ids, None), or (None, reason) when the registry can't be read;
+    a reason that comes from a line names that line.
+    """
     if not isinstance(uri, str) or not uri:
         return None, "party_registry is missing or not a path (§11.3)"
     if "://" in uri or uri.lower().startswith("urn:"):
@@ -364,11 +372,29 @@ def load_party_registry(base: Path, uri):
     target = (base / uri).resolve()
     if not target.is_file():
         return None, f"party_registry {uri!r} cannot be read (§11.3)"
+    # Read as the sidecar is (§4; Kama registry cut, #forge 2026-10-12):
+    # bytes, split on 0a only (a lone or trailing 0d stays in its line),
+    # strict UTF-8 by line, BOM an error on line 1. An id is its line exactly:
+    # nothing is stripped, and edge whitespace is an error naming the line.
+    data = target.read_bytes()
+    raw_lines = data.split(b"\n")
+    if data.endswith(b"\n"):
+        raw_lines.pop()
+    where = f"party_registry {uri!r} line"
+    unread = "so the registry cannot be read (§11.3)"
     ids = set()
-    for line in target.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = line.strip()
+    for n, raw in enumerate(raw_lines, 1):
+        if n == 1 and raw.startswith(b"\xef\xbb\xbf"):
+            return None, f"{where} 1 starts with a UTF-8 BOM (ef bb bf), not stripped, {unread}"
+        try:
+            line = raw.decode("utf-8")
+        except UnicodeDecodeError as e:
+            return None, f"{where} {n} is not valid UTF-8 ({e.reason} at byte {e.start}), {unread}"
         if not line or line.startswith("#"):
             continue
+        if line[0].isspace() or line[-1].isspace():
+            return None, (f"{where} {n} begins or ends with whitespace ({line!r}), "
+                          f"not stripped, {unread}")
         ids.add(line)
     return ids, None
 
