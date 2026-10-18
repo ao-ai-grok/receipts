@@ -239,13 +239,24 @@ Whitespace here is the Unicode `White_Space` set: `09`–`0d`, `20`, U+0085,
 U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000.
 (@grok draft.)
 
+The same type rule covers the fields a checker reads to reach a verdict.
+`source.sha256`, when present, is a string of 64 lowercase hex digits.
+`source.lines`, when present, is a string `A` or `A-B`: decimal digits, no
+sign, no leading zero, no whitespace, `A` at least 1, and `B` not below
+`A`. `kind` (§11), when present, is a string. Any other type or shape is
+an error naming the line and the field, before any source is read. It is
+an error in the receipt, not a verdict on the source.
+(Type cut: Kama, `#forge` 2026-10-18. The `sha256` and `lines` shapes:
+@grok draft.)
+
 Unknown fields MUST be preserved by tools and ignored by checkers that do
 not implement them.
 
 **Line-range bytes** (@grok draft). Neither v0.1 nor any decision says how
 `source.lines` selects bytes. So two checkers can disagree and both look
 conformant. This draft adopts the reference checker's existing rule, and
-no other: `source.lines` is `A-B` or `A`, 1-based and inclusive. Lines
+no other: `source.lines` is `A-B` or `A`, 1-based and inclusive (shape:
+Field types, above). Lines
 are split before anything is decoded: an invalid UTF-8 byte is never a
 line boundary and never moves one, so invalid bytes outside the range do
 not change which bytes the range selects and do not affect the verdict.
@@ -756,7 +767,7 @@ A checker MUST NOT emit `UNREAD`, `SELF-READ`, `UNTESTED`, `UNBOUNDED`,
 `SELF-REPORTED`, `BOUNDED`, `WITNESSED`, `UNRECORDED`, or `CLAIMED` merely
 because `kind` is set. That would report a check it did not perform. A `kind`
 value outside the table: the checker MAY warn; `--strict` makes it an
-error.
+error. A `kind` that is not a string is an error naming the line (§4.1).
 
 ### 11.1 Escalations (D-028)
 
@@ -1202,6 +1213,18 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   whitespace, else an error naming the line and the field (Kama, `#forge`
   2026-10-18). Which characters count as whitespace is named: Unicode
   `White_Space` (@grok draft).
+
+**v0.2-draft, sidecar: sha256, lines, kind types**
+
+- §4.1: `sha256` 42 and `kind` `["read"]` ended in `TypeError` tracebacks.
+  `lines` `"abc"` read `UNREADABLE` with no `form_used`, and was a
+  `ValueError` traceback with `form_used` `lines-utf8-nl`. `lines` `"0-1"`
+  selected no bytes and read `OK`. `sha256` `""` was taken as absent and
+  read `OK`, and an uppercase hash read `CHANGED`. Now `sha256` is 64
+  lowercase hex, `lines` is `A` or `A-B`, and `kind` is a string. Anything
+  else is an error naming the line and the field, before any source is
+  read (Kama's type cut, `#forge` 2026-10-18; the shapes are @grok draft).
+  A `kind` string outside the §11 table still warns.
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
