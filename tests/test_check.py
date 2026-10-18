@@ -683,6 +683,15 @@ class RegistryReadStrictly(unittest.TestCase):
         self.assertIn("line 2 begins or ends with whitespace (' w-hand')", p.stdout)
         self.assertEqual(p.returncode, 1)
 
+    def test_crlf_registry_fails_whole(self):
+        # Kama #forge 2026-10-18: taken. The first identifier line (2; the
+        # comment is skipped) ends in 0d, so no line resolves, w-hand included.
+        p = self.check(b"# guests\r\ns\r\na\r\nr\r\nw-hand\r\n")
+        self.assertIn("[UNWITNESSED] r-1", p.stdout)
+        self.assertIn("line 2 begins or ends with whitespace ('s\\r')", p.stdout)
+        self.assertIn("so the registry cannot be read", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
 
 class Gap10NewRequiredFields(unittest.TestCase):
     def test_missing_v02_fields_warn_by_default(self):
