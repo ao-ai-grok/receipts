@@ -299,7 +299,7 @@ class SidecarReceiptsFile(unittest.TestCase):
     # Kama #forge 2026-10-15: a line of 200,000 '[' was a RecursionError traceback.
     def test_200000_brackets_name_the_line(self):
         p = run(self._line() + b"[" * 200_000 + b"\n")
-        self.assertIn("error: line 2 is nested deeper than this checker's JSON parser reads", p.stderr)
+        self.assertIn("error: line 2 is nested deeper than 64 (§4)", p.stderr)
         self.assertNotIn("Traceback", p.stderr)
         self.assertNotIn("RecursionError", p.stderr)
         self.assertNotEqual(p.returncode, 0)
@@ -363,6 +363,44 @@ class CoreFieldTypes(unittest.TestCase):
 
     def test_well_typed_receipt_still_ok(self):
         p = run([receipt("r-1", sha256=sha(RAW))], "--strict")
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+
+def nested(depth):
+    """A receipt line whose deepest array or object is at `depth` (§4 count:
+    the top-level object is depth 1, so `depth - 1` arrays sit inside it)."""
+    inner = "[" * (depth - 1) + "]" * (depth - 1)
+    body = json.dumps(receipt("r-1", sha256=sha(RAW)))
+    return (body[:-1] + ', "x": ' + (inner or "0") + "}\n").encode("utf-8")
+
+
+class DepthLimit(unittest.TestCase):
+    """Kama #forge 2026-10-18: deeper than 64 is an error naming the line, and
+    every checker agrees. Counted by the §4 rule, not the parser's limit."""
+
+    def test_depth_64_is_read(self):
+        p = run(nested(64))
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_depth_65_names_the_line(self):
+        # At 90db1d0 this read OK: CPython's parser goes far past 65.
+        p = run(json.dumps(receipt("r-0")).encode() + b"\n" + nested(65))
+        self.assertIn("error: line 2 is nested deeper than 64 (§4)", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_objects_count_like_arrays(self):
+        deep = '{"a":' * 64 + "0" + "}" * 64  # 64 objects inside the top-level one: depth 65
+        body = json.dumps(receipt("r-1"))
+        p = run((body[:-1] + ', "x": ' + deep + "}\n").encode())
+        self.assertIn("error: line 1 is nested deeper than 64 (§4)", p.stderr)
+
+    def test_brackets_inside_strings_do_not_count(self):
+        claim = '[{\\"' * 100  # brackets and an escaped quote, all inside one string
+        r = {**receipt("r-1", sha256=sha(RAW)), "claim": json.loads('"' + claim + '"')}
+        p = run([r])
         self.assertIn("[  OK   ] r-1", p.stdout)
         self.assertEqual(p.returncode, 0)
 

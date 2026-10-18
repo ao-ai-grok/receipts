@@ -19,7 +19,7 @@
 #
 # What this checker implements of SPEC v0.2-draft (§9 asks a tool to say):
 #   §4     sidecar read as bytes, 0a only, strict UTF-8, strict JSON; any
-#          error, including nesting past the parser's depth, names the line.
+#          error, including nesting deeper than 64, names the line.
 #   §4.1   required fields, including source.uri; ids unique in the file.
 #          id, claim, author are strings; date is YYYY-MM-DD; supersedes is a
 #          string or null. Else an error naming the line and the field.
@@ -213,8 +213,10 @@ def _strict_json_object(line: str, n: int):
 
     Duplicate keys → error naming line and key. NaN / Infinity / -Infinity →
     error naming the line. A non-object → error naming the line before fields.
-    Nesting past the parser's depth → error naming the line (Kama, 2026-10-15).
+    Nested deeper than 64 → error naming the line (Kama, 2026-10-15 / 10-18).
     """
+    if nested_deeper_than(line):
+        sys.exit(f"error: line {n} is nested deeper than {MAX_DEPTH} (§4)")
     dup = {}
 
     def object_pairs_hook(pairs):
@@ -236,14 +238,44 @@ def _strict_json_object(line: str, n: int):
     except ValueError as e:
         sys.exit(f"error: line {n} is not valid JSON: {e}")
     except RecursionError:
-        # Kama #forge 2026-10-15: 200,000 '[' was a traceback. No depth
-        # number is fixed (§4); this names the line where the parser stops.
+        # Not reached at depth <= 64 under a default interpreter; kept so a
+        # parser limit is still an error naming the line, not a traceback.
         sys.exit(f"error: line {n} is nested deeper than this checker's JSON parser reads")
     if "key" in dup:
         sys.exit(f"error: line {n} has duplicate key {dup['key']!r}")
     if not isinstance(r, dict):
         sys.exit(f"error: line {n} is JSON but not an object")
     return r
+
+
+MAX_DEPTH = 64  # §4 (Kama, #forge 2026-10-18)
+
+
+def nested_deeper_than(line: str, limit: int = MAX_DEPTH) -> bool:
+    """Depth by the §4 counting rule, not the parser's limit (@grok draft).
+
+    Arrays and objects count; the top-level object is depth 1. A bracket
+    inside a string is not a bracket. Scans without recursion, so the
+    answer is the same whatever the interpreter's recursion limit.
+    """
+    depth, in_string, escaped = 0, False, False
+    for ch in line:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch in "[{":
+            depth += 1
+            if depth > limit:
+                return True
+        elif ch in "]}":
+            depth -= 1
+    return False
 
 
 JSON_TYPES = ((type(None), "null"), (bool, "a boolean"), ((int, float), "a number"),
