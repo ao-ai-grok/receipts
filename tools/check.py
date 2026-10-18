@@ -23,7 +23,9 @@
 #   §4.1   required fields, including source.uri; ids unique in the file.
 #          id, claim, author are non-empty strings, not only whitespace;
 #          date is YYYY-MM-DD; supersedes is a string or null. Else an error
-#          naming the line and the field.
+#          naming the line and the field. source.sha256 is 64 lowercase
+#          hex, source.lines is A or A-B, kind is a string; else an error
+#          naming the line and the field, before any source is read.
 #          sha256 is compared to the bytes actually hashed: the source.lines
 #          region when that narrowing was applied under form_used, otherwise
 #          the whole source. source.span has no format and is ignored; the
@@ -313,6 +315,31 @@ def check_field_types(r, n):
                  "not a string or null")
 
 
+SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+LINES_SHAPE = re.compile(r"([1-9][0-9]*)(?:-([1-9][0-9]*))?")  # ASCII digits only; not int()
+
+
+def lines_ok(value):
+    """source.lines is "A" or "A-B": no sign, no leading zero, A >= 1, B >= A (§4.1)."""
+    m = LINES_SHAPE.fullmatch(value) if isinstance(value, str) else None
+    return bool(m) and (m.group(2) is None or int(m.group(2)) >= int(m.group(1)))
+
+
+def check_source_types(r, n):
+    """Kama's type cut (#forge 2026-10-18): what a checker reads to reach a
+    verdict is typed, or it is an error naming the line and field (§4.1)."""
+    shown = lambda v: repr(v) if isinstance(v, str) else json_type(v)
+    if "kind" in r and not isinstance(r["kind"], str):
+        sys.exit(f"error: receipt on line {n} field 'kind' is {json_type(r['kind'])}, not a string")
+    src = r["source"]
+    if "sha256" in src and not (isinstance(src["sha256"], str) and SHA256_HEX.fullmatch(src["sha256"])):
+        sys.exit(f"error: receipt on line {n} field 'source.sha256' is {shown(src['sha256'])}, "
+                 "not 64 lowercase hex digits")
+    if "lines" in src and not lines_ok(src["lines"]):
+        sys.exit(f"error: receipt on line {n} field 'source.lines' is {shown(src['lines'])}, "
+                 "not A or A-B (line numbers from 1, no leading zero, B not below A)")
+
+
 def load_receipts(path: Path):
     """Read a sidecar as bytes (§4 receipts-file cut).
 
@@ -345,6 +372,7 @@ def load_receipts(path: Path):
         uri = r["source"].get("uri") if isinstance(r["source"], dict) else None
         if not uri or not isinstance(uri, str):
             sys.exit(f"error: receipt on line {n} missing required field 'source.uri'")
+        check_source_types(r, n)
         if r["id"] in seen:
             sys.exit(f"error: receipt on line {n} reuses id '{r['id']}' from line {seen[r['id']]}")
         seen[r["id"]] = n

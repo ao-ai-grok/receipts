@@ -437,6 +437,73 @@ class CoreStringsNameSomething(unittest.TestCase):
         self.assertNamed(p, 1, "author", "only whitespace")
 
 
+class SourceAndKindTypes(unittest.TestCase):
+    """Kama #forge 2026-10-18 type cut: sha256 42 and kind ["read"] were
+    TypeError tracebacks; lines "abc" read UNREADABLE. Each is now an error
+    naming the line and the field, before any source is read (§4.1)."""
+
+    def assertNamed(self, p, field, what, line=1):
+        self.assertIn(f"error: receipt on line {line} field '{field}' is {what}", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertNotIn("[", p.stdout)  # no verdict printed
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_sha256_42(self):
+        p = run([receipt("r-1", sha256=42)])
+        self.assertNamed(p, "source.sha256", "a number, not 64 lowercase hex digits")
+
+    def test_sha256_empty_is_not_absent(self):  # was OK, read as no hash
+        p = run([receipt("r-1", sha256="")])
+        self.assertNamed(p, "source.sha256", "'', not 64 lowercase hex digits")
+
+    def test_sha256_uppercase(self):  # was CHANGED: a source that never moved
+        p = run([receipt("r-1", sha256=sha(RAW).upper())])
+        self.assertNamed(p, "source.sha256", repr(sha(RAW).upper()) + ", not 64 lowercase hex digits")
+
+    def test_sha256_null(self):
+        p = run([receipt("r-1", sha256=None)])
+        self.assertNamed(p, "source.sha256", "null, not 64 lowercase hex digits")
+
+    def test_type_error_comes_before_the_source_is_read(self):  # was MISSING
+        p = run([receipt("r-1", uri="nowhere.txt", sha256=42)])
+        self.assertNamed(p, "source.sha256", "a number")
+
+    def test_kind_list(self):
+        p = run([receipt("r-1"), {**receipt("r-2"), "kind": ["read"]}])
+        self.assertNamed(p, "kind", "an array, not a string", line=2)
+
+    def test_kind_string_outside_the_table_still_warns(self):
+        p = run([{**receipt("r-1"), "kind": "invoice"}])
+        self.assertIn("kind is not one of the §11 classes", p.stderr)
+        self.assertNotIn("error:", p.stderr)
+
+    def test_lines_abc(self):  # was UNREADABLE, exit 1
+        p = run([receipt("r-1", lines="abc")])
+        self.assertNamed(p, "source.lines", "'abc', not A or A-B")
+
+    def test_lines_abc_with_form_used(self):  # was a ValueError traceback
+        p = run([receipt("r-1", lines="abc", form_used="lines-utf8-nl")])
+        self.assertNamed(p, "source.lines", "'abc', not A or A-B")
+
+    def test_lines_shapes_int_accepts(self):
+        # Each was read by int(): "0-1" selected no bytes and read OK;
+        # "\u0662" is an Arabic-Indic 2; 2 (a number) was str()-ed to "2".
+        for bad, shown in (("0-1", "'0-1'"), ("3-2", "'3-2'"), ("02", "'02'"), (" 2", "' 2'"),
+                           ("+2", "'+2'"), ("1_0", "'1_0'"), ("\u0662", repr("\u0662")),
+                           ("2-", "'2-'"), (2, "a number"), (["2"], "an array"), (None, "null")):
+            with self.subTest(lines=bad):
+                p = run([receipt("r-1", lines=bad, form_used="lines-utf8-nl", sha256=sha(b"line two"))])
+                self.assertNamed(p, "source.lines", shown + ", not A or A-B")
+
+    def test_good_lines_still_check(self):
+        for good, data in (("2", b"line two"), ("2-3", b"line two\nline three"),
+                           ("1-1", b"line one")):
+            with self.subTest(lines=good):
+                p = run([receipt("r-1", lines=good, form_used="lines-utf8-nl", sha256=sha(data))])
+                self.assertIn("[  OK   ] r-1", p.stdout)
+                self.assertEqual(p.returncode, 0)
+
+
 class Gap3Span(unittest.TestCase):
     def test_span_is_not_applied_and_says_so(self):
         p = run([receipt("r-1", span="5-12", sha256=sha(RAW))])
