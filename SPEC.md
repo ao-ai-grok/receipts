@@ -183,10 +183,14 @@ After the line is decoded, it is parsed as JSON strictly — not with a lenient
 key. `NaN` and `Infinity` (and `-Infinity`) are not JSON and are an error naming
 the line. A line that is JSON but not an object is an error naming the line,
 before any required-field check. (Kama's JSON-strictness cut, `#forge`
-2026-10-14.) A line nested deeper than the checker's parser can read (say,
-200,000 `[`) is an error naming the line, not a crash. This draft fixes no
-depth number; a checker names the line where it stops. (Kama, `#forge`
-2026-10-15.) (Inline and embedded formats may come later; the sidecar keeps the
+2026-10-14.) A line nested deeper than 64 is an error naming the line, not a
+crash, and every checker stops at the same line. (Kama, `#forge` 2026-10-15;
+64: Kama, `#forge` 2026-10-18.) Depth counts arrays and objects only: the
+line's top-level object is depth 1, and an array or object inside one at
+depth d is at depth d+1. Strings, numbers, `true`, `false` and `null` add
+nothing, and a bracket inside a string is not a bracket. A checker MUST
+read depth 64 and MUST make depth 65 an error, whatever its parser's own
+limit. (Counting rule: @grok draft.) (Inline and embedded formats may come later; the sidecar keeps the
 spec independent of the report's own format.)
 
 ### 4.1 Core fields (v0.1, plus draft resolutions on span and sha256)
@@ -1176,6 +1180,14 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   flag, not text. Kama took it (`#forge` 2026-10-18), and the sentence now
   says so: no line of a CRLF registry resolves. It is the same `0d` that
   line-range bytes keep.
+
+**v0.2-draft, sidecar: depth 64**
+
+- §4: the Oct 15 fold named the line where the parser stopped, with no
+  number, so two checkers could stop on different lines. Now a line
+  deeper than 64 is an error naming the line (Kama, `#forge` 2026-10-18).
+  Depth is counted over arrays and objects, with the top-level object at
+  depth 1, by the checker and not by its parser's limit (@grok draft).
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
