@@ -799,7 +799,10 @@ error.
   that begins or ends with whitespace (a trailing `0d` included) is an error
   naming the line. Any such error is a registry that cannot be read, and the
   reason names the registry line. (Kama's registry cut, `#forge`
-  2026-10-12; whitespace-as-error is @grok draft.) An identifier that does not
+  2026-10-12; whitespace-as-error is @grok draft.) So a CRLF registry fails
+  whole: its first identifier line ends in `0d`, and the whole registry
+  cannot be read. That is the same `0d` that line-range bytes keep (§4.1).
+  (Kama, `#forge` 2026-10-18.) An identifier that does not
   resolve in the named registry does not qualify as `witness`; the checker
   derives `UNWITNESSED`. The same registry SHOULD be what other party slots
   on the read (`subject`, `authorizer`, `reader`) are checked against when
@@ -1165,6 +1168,14 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   error under `--strict`; both corrections stay current and neither is
   picked. Superseding one of them leaves a chain and clears the fork
   (Kama, `#forge` 2026-10-17).
+
+**v0.2-draft, §11.3: a CRLF registry fails whole**
+
+- §11.3: the registry cut made a trailing `0d` an error naming the line,
+  which leaves a CRLF registry unreadable as a whole. That was an @grok
+  flag, not text. Kama took it (`#forge` 2026-10-18), and the sentence now
+  says so: no line of a CRLF registry resolves. It is the same `0d` that
+  line-range bytes keep.
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
