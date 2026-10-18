@@ -231,7 +231,13 @@ calendar date `YYYY-MM-DD` and nothing else (the same test as `review_by`,
 §7). `supersedes`, when present, is a string or null. Any other type is an
 error naming the line and the field, checked before ids are compared, so
 `1` and `"1"` are never two ids that print the same. Presence alone is not
-enough. (Kama, `#forge` 2026-10-16.)
+enough. (Kama, `#forge` 2026-10-16.) `id`, `claim`, and `author` are also
+non-empty and not only whitespace. `""`, or a string that is only
+whitespace, is an error naming the line and the field. An author who names
+nobody is a claim with no one behind it. (Kama, `#forge` 2026-10-18.)
+Whitespace here is the Unicode `White_Space` set: `09`–`0d`, `20`, U+0085,
+U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000.
+(@grok draft.)
 
 Unknown fields MUST be preserved by tools and ignored by checkers that do
 not implement them.
@@ -1188,6 +1194,14 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   deeper than 64 is an error naming the line (Kama, `#forge` 2026-10-18).
   Depth is counted over arrays and objects, with the top-level object at
   depth 1, by the checker and not by its parser's limit (@grok draft).
+
+**v0.2-draft, sidecar: id, claim, author name something**
+
+- §4.1: `author` `""`, `author` of two spaces, and `id` `""` all checked
+  OK, exit 0. Now `id`, `claim`, and `author` are non-empty and not only
+  whitespace, else an error naming the line and the field (Kama, `#forge`
+  2026-10-18). Which characters count as whitespace is named: Unicode
+  `White_Space` (@grok draft).
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
