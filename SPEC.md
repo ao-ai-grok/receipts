@@ -183,10 +183,14 @@ After the line is decoded, it is parsed as JSON strictly — not with a lenient
 key. `NaN` and `Infinity` (and `-Infinity`) are not JSON and are an error naming
 the line. A line that is JSON but not an object is an error naming the line,
 before any required-field check. (Kama's JSON-strictness cut, `#forge`
-2026-10-14.) A line nested deeper than the checker's parser can read (say,
-200,000 `[`) is an error naming the line, not a crash. This draft fixes no
-depth number; a checker names the line where it stops. (Kama, `#forge`
-2026-10-15.) (Inline and embedded formats may come later; the sidecar keeps the
+2026-10-14.) A line nested deeper than 64 is an error naming the line, not a
+crash, and every checker stops at the same line. (Kama, `#forge` 2026-10-15;
+64: Kama, `#forge` 2026-10-18.) Depth counts arrays and objects only: the
+line's top-level object is depth 1, and an array or object inside one at
+depth d is at depth d+1. Strings, numbers, `true`, `false` and `null` add
+nothing, and a bracket inside a string is not a bracket. A checker MUST
+read depth 64 and MUST make depth 65 an error, whatever its parser's own
+limit. (Counting rule: @grok draft.) (Inline and embedded formats may come later; the sidecar keeps the
 spec independent of the report's own format.)
 
 ### 4.1 Core fields (v0.1, plus draft resolutions on span and sha256)
@@ -227,7 +231,23 @@ calendar date `YYYY-MM-DD` and nothing else (the same test as `review_by`,
 §7). `supersedes`, when present, is a string or null. Any other type is an
 error naming the line and the field, checked before ids are compared, so
 `1` and `"1"` are never two ids that print the same. Presence alone is not
-enough. (Kama, `#forge` 2026-10-16.)
+enough. (Kama, `#forge` 2026-10-16.) `id`, `claim`, and `author` are also
+non-empty and not only whitespace. `""`, or a string that is only
+whitespace, is an error naming the line and the field. An author who names
+nobody is a claim with no one behind it. (Kama, `#forge` 2026-10-18.)
+Whitespace here is the Unicode `White_Space` set: `09`–`0d`, `20`, U+0085,
+U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000.
+(@grok draft.)
+
+The same type rule covers the fields a checker reads to reach a verdict.
+`source.sha256`, when present, is a string of 64 lowercase hex digits.
+`source.lines`, when present, is a string `A` or `A-B`: decimal digits, no
+sign, no leading zero, no whitespace, `A` at least 1, and `B` not below
+`A`. `kind` (§11), when present, is a string. Any other type or shape is
+an error naming the line and the field, before any source is read. It is
+an error in the receipt, not a verdict on the source.
+(Type cut: Kama, `#forge` 2026-10-18. The `sha256` and `lines` shapes:
+@grok draft.)
 
 Unknown fields MUST be preserved by tools and ignored by checkers that do
 not implement them.
@@ -235,7 +255,8 @@ not implement them.
 **Line-range bytes** (@grok draft). Neither v0.1 nor any decision says how
 `source.lines` selects bytes. So two checkers can disagree and both look
 conformant. This draft adopts the reference checker's existing rule, and
-no other: `source.lines` is `A-B` or `A`, 1-based and inclusive. Lines
+no other: `source.lines` is `A-B` or `A`, 1-based and inclusive (shape:
+Field types, above). Lines
 are split before anything is decoded: an invalid UTF-8 byte is never a
 line boundary and never moves one, so invalid bytes outside the range do
 not change which bytes the range selects and do not affect the verdict.
@@ -746,7 +767,7 @@ A checker MUST NOT emit `UNREAD`, `SELF-READ`, `UNTESTED`, `UNBOUNDED`,
 `SELF-REPORTED`, `BOUNDED`, `WITNESSED`, `UNRECORDED`, or `CLAIMED` merely
 because `kind` is set. That would report a check it did not perform. A `kind`
 value outside the table: the checker MAY warn; `--strict` makes it an
-error.
+error. A `kind` that is not a string is an error naming the line (§4.1).
 
 ### 11.1 Escalations (D-028)
 
@@ -799,7 +820,10 @@ error.
   that begins or ends with whitespace (a trailing `0d` included) is an error
   naming the line. Any such error is a registry that cannot be read, and the
   reason names the registry line. (Kama's registry cut, `#forge`
-  2026-10-12; whitespace-as-error is @grok draft.) An identifier that does not
+  2026-10-12; whitespace-as-error is @grok draft.) So a CRLF registry fails
+  whole: its first identifier line ends in `0d`, and the whole registry
+  cannot be read. That is the same `0d` that line-range bytes keep (§4.1).
+  (Kama, `#forge` 2026-10-18.) An identifier that does not
   resolve in the named registry does not qualify as `witness`; the checker
   derives `UNWITNESSED`. The same registry SHOULD be what other party slots
   on the read (`subject`, `authorizer`, `reader`) are checked against when
@@ -1165,6 +1189,42 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   error under `--strict`; both corrections stay current and neither is
   picked. Superseding one of them leaves a chain and clears the fork
   (Kama, `#forge` 2026-10-17).
+
+**v0.2-draft, §11.3: a CRLF registry fails whole**
+
+- §11.3: the registry cut made a trailing `0d` an error naming the line,
+  which leaves a CRLF registry unreadable as a whole. That was an @grok
+  flag, not text. Kama took it (`#forge` 2026-10-18), and the sentence now
+  says so: no line of a CRLF registry resolves. It is the same `0d` that
+  line-range bytes keep.
+
+**v0.2-draft, sidecar: depth 64**
+
+- §4: the Oct 15 fold named the line where the parser stopped, with no
+  number, so two checkers could stop on different lines. Now a line
+  deeper than 64 is an error naming the line (Kama, `#forge` 2026-10-18).
+  Depth is counted over arrays and objects, with the top-level object at
+  depth 1, by the checker and not by its parser's limit (@grok draft).
+
+**v0.2-draft, sidecar: id, claim, author name something**
+
+- §4.1: `author` `""`, `author` of two spaces, and `id` `""` all checked
+  OK, exit 0. Now `id`, `claim`, and `author` are non-empty and not only
+  whitespace, else an error naming the line and the field (Kama, `#forge`
+  2026-10-18). Which characters count as whitespace is named: Unicode
+  `White_Space` (@grok draft).
+
+**v0.2-draft, sidecar: sha256, lines, kind types**
+
+- §4.1: `sha256` 42 and `kind` `["read"]` ended in `TypeError` tracebacks.
+  `lines` `"abc"` read `UNREADABLE` with no `form_used`, and was a
+  `ValueError` traceback with `form_used` `lines-utf8-nl`. `lines` `"0-1"`
+  selected no bytes and read `OK`. `sha256` `""` was taken as absent and
+  read `OK`, and an uppercase hash read `CHANGED`. Now `sha256` is 64
+  lowercase hex, `lines` is `A` or `A-B`, and `kind` is a string. Anything
+  else is an error naming the line and the field, before any source is
+  read (Kama's type cut, `#forge` 2026-10-18; the shapes are @grok draft).
+  A `kind` string outside the §11 table still warns.
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
