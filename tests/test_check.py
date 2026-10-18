@@ -405,6 +405,38 @@ class DepthLimit(unittest.TestCase):
         self.assertEqual(p.returncode, 0)
 
 
+class CoreStringsNameSomething(unittest.TestCase):
+    """Kama #forge 2026-10-18: "" as a string is cut. id, claim and author are
+    non-empty and not only whitespace, else an error naming line and field."""
+
+    def assertNamed(self, p, line, field, what):
+        self.assertIn(f"error: receipt on line {line} field '{field}' is {what}", p.stderr)
+        self.assertNotIn("[  OK   ]", p.stdout)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_author_empty(self):  # Kama: checked OK, exit 0
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "author": ""}])
+        self.assertNamed(p, 1, "author", "empty")
+
+    def test_author_two_spaces(self):  # Kama: checked OK, exit 0
+        p = run([receipt("r-1", sha256=sha(RAW)), {**receipt("r-2", sha256=sha(RAW)), "author": "  "}])
+        self.assertNamed(p, 2, "author", "only whitespace ('  ')")
+
+    def test_id_empty(self):  # Kama: checked OK, exit 0
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "id": ""}])
+        self.assertNamed(p, 1, "id", "empty")
+
+    def test_claim_only_whitespace(self):
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "claim": "\t\r\n"}])
+        self.assertNamed(p, 1, "claim", "only whitespace")
+
+    def test_unicode_white_space_counts(self):
+        # U+3000 and U+00A0 are Unicode White_Space (§4.1 list).
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "author": "\u3000\u00a0"}])
+        self.assertNamed(p, 1, "author", "only whitespace")
+
+
 class Gap3Span(unittest.TestCase):
     def test_span_is_not_applied_and_says_so(self):
         p = run([receipt("r-1", span="5-12", sha256=sha(RAW))])

@@ -21,8 +21,9 @@
 #   §4     sidecar read as bytes, 0a only, strict UTF-8, strict JSON; any
 #          error, including nesting deeper than 64, names the line.
 #   §4.1   required fields, including source.uri; ids unique in the file.
-#          id, claim, author are strings; date is YYYY-MM-DD; supersedes is a
-#          string or null. Else an error naming the line and the field.
+#          id, claim, author are non-empty strings, not only whitespace;
+#          date is YYYY-MM-DD; supersedes is a string or null. Else an error
+#          naming the line and the field.
 #          sha256 is compared to the bytes actually hashed: the source.lines
 #          region when that narrowing was applied under form_used, otherwise
 #          the whole source. source.span has no format and is ignored; the
@@ -278,6 +279,10 @@ def nested_deeper_than(line: str, limit: int = MAX_DEPTH) -> bool:
     return False
 
 
+# Unicode White_Space (§4.1, @grok draft): what "only whitespace" means.
+WHITE_SPACE = frozenset("\t\n\x0b\x0c\r \x85\xa0\u1680" + "".join(map(chr, range(0x2000, 0x200B)))
+                        + "\u2028\u2029\u202f\u205f\u3000")
+
 JSON_TYPES = ((type(None), "null"), (bool, "a boolean"), ((int, float), "a number"),
               (str, "a string"), (list, "an array"), (dict, "an object"))
 
@@ -290,8 +295,15 @@ def json_type(value):
 def check_field_types(r, n):
     """Core field types (§4.1; Kama, #forge 2026-10-16). Presence is not enough."""
     for field in ("id", "claim", "author"):
-        if not isinstance(r[field], str):
-            sys.exit(f"error: receipt on line {n} field '{field}' is {json_type(r[field])}, not a string")
+        value = r[field]
+        if not isinstance(value, str):
+            sys.exit(f"error: receipt on line {n} field '{field}' is {json_type(value)}, not a string")
+        # Kama #forge 2026-10-18: an author that names nobody is a claim with
+        # no one behind it. Same for an id or a claim of nothing.
+        if value == "":
+            sys.exit(f"error: receipt on line {n} field '{field}' is empty")
+        if all(ch in WHITE_SPACE for ch in value):
+            sys.exit(f"error: receipt on line {n} field '{field}' is only whitespace ({value!r})")
     if not ymd_ok(r["date"]):
         shown = repr(r["date"]) if isinstance(r["date"], str) else json_type(r["date"])
         sys.exit(f"error: receipt on line {n} field 'date' is {shown}, not a YYYY-MM-DD date")
