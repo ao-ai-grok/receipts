@@ -66,7 +66,9 @@
 #          The registry is read as the sidecar is (bytes, 0a only, strict
 #          UTF-8, BOM an error, Kama registry cut 2026-10-12); an id is its
 #          line exactly, and edge whitespace (a trailing 0d too) is an error
-#          naming the line. Any such error: registry cannot be read.
+#          naming the line; whitespace is the §4.1 White_Space set that
+#          id, claim, author use, not isspace (Kama #forge 2026-10-19).
+#          Any such error: registry cannot be read.
 #          Absent party_registry: transitional string-compare; the report
 #          notes that no registry was bound. window is YYYY-MM-DD/YYYY-MM-DD
 #          and is not checked against a time. subject does not make a receipt
@@ -282,8 +284,25 @@ def nested_deeper_than(line: str, limit: int = MAX_DEPTH) -> bool:
 
 
 # Unicode White_Space (§4.1, @grok draft): what "only whitespace" means.
+# The one whitespace this checker knows (Kama #forge 2026-10-19: one set, not
+# two). Python's str.isspace, str.strip(), str.split() and re's \s also count
+# 1c-1f, so none of them is used: the registry edge rule, id/claim/author,
+# the disputed mark and the coverage fold all go through the helpers below.
 WHITE_SPACE = frozenset("\t\n\x0b\x0c\r \x85\xa0\u1680" + "".join(map(chr, range(0x2000, 0x200B)))
                         + "\u2028\u2029\u202f\u205f\u3000")
+WS_CHARS = "".join(sorted(WHITE_SPACE))
+WS_CLASS = "[" + "".join(f"\\u{ord(c):04x}" for c in sorted(WHITE_SPACE)) + "]"
+WS_RUN = re.compile(WS_CLASS + "+")
+
+
+def strip_ws(text):
+    """text without leading or trailing White_Space (§4.1 set)."""
+    return text.strip(WS_CHARS)
+
+
+def fold_ws(text):
+    """Runs of White_Space folded to one space, edges dropped (§4.1 set)."""
+    return " ".join(w for w in WS_RUN.split(text) if w)
 
 JSON_TYPES = ((type(None), "null"), (bool, "a boolean"), ((int, float), "a number"),
               (str, "a string"), (list, "an array"), (dict, "an object"))
@@ -524,7 +543,7 @@ def load_party_registry(base: Path, uri):
             return None, f"{where} {n} is not valid UTF-8 ({e.reason} at byte {e.start}), {unread}"
         if not line or line.startswith("#"):
             continue
-        if line[0].isspace() or line[-1].isspace():
+        if line[0] in WHITE_SPACE or line[-1] in WHITE_SPACE:  # §4.1 set, not isspace
             return None, (f"{where} {n} begins or ends with whitespace ({line!r}), "
                           f"not stripped, {unread}")
         ids.add(line)
@@ -635,7 +654,7 @@ def closed_decisions(text):
         if not m:
             continue
         src = re.search(r"^- \*\*Source:\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", sec, re.S | re.M)
-        closed[m.group(1)] = " ".join(src.group(1).split()) if src else None
+        closed[m.group(1)] = fold_ws(src.group(1)) if src else None
     return closed
 
 
@@ -664,7 +683,7 @@ def spec_folds(text):
         elif section == "sources":
             m = re.match(r"- \*\*(D-\d{3})\*\* — (.*)$", line)
             if m:
-                sources[m.group(1)] = " ".join(m.group(2).split())
+                sources[m.group(1)] = fold_ws(m.group(2))
     return cited, dropped, sources
 
 
@@ -676,7 +695,7 @@ def spec_pin(text):
     m = PIN_LINE.search(text)
     if not m:
         return None
-    body = " ".join(m.group(1).split())
+    body = fold_ws(m.group(1))
     ev = re.search(r"\bevent (\d+)\b", body)
     rng = re.search(r"\bD-(\d{3}) through D-(\d{3})\b", body)
     if not ev or not rng:
@@ -701,24 +720,24 @@ def spec_pin_reads(text):
         return []
     items = []
     for line in m.group(1).splitlines():
-        if re.match(r"^\s+- ", line):
-            items.append(line.strip())
-        elif items and line.strip():
-            items[-1] += " " + line.strip()
+        if re.match(WS_CLASS + r"+- ", line):
+            items.append(strip_ws(line))
+        elif items and strip_ws(line):
+            items[-1] += " " + strip_ws(line)
     return [r.groups() for r in (READ_LINE.match(i) for i in items) if r]
 
 
 def spec_pin_author(text):
     """The pin post's author as named in the SPEC §0 Pin line, or None."""
     m = PIN_LINE.search(text)
-    a = PIN_AUTHOR.search(" ".join(m.group(1).split())) if m else None
-    return a.group(1).strip() if a else None
+    a = PIN_AUTHOR.search(fold_ws(m.group(1))) if m else None
+    return strip_ws(a.group(1)) if a else None
 
 
 def read_kind(read, pin, author):
     """counted | AUTHOR | CLAIMED for one pin-read line (SPEC §0)."""
     who, ev, _, _, _, rest = read
-    name = lambda w: w.strip().lstrip("@").casefold()
+    name = lambda w: strip_ws(w).lstrip("@").casefold()
     if (re.search(r"\bAUTHOR\b", who + rest) or ev == pin
             or (author and name(who) == name(author))):
         return AUTHOR
@@ -752,7 +771,7 @@ def pin_read_gaps(spec_text, decisions: Path, pin, quoted):
         out.append(read[:-1] + (kind,))
         tag = "" if kind == COUNTED else f" [{kind}, not counted]"
         ev = f"event {ev}" if ev else "no own post"
-        who = re.sub(r"^AUTHOR:\s*", "", who)
+        who = re.sub(r"^AUTHOR:" + WS_CLASS + "*", "", who)
         if text is None:
             notes.append(f"pin read {who} ({ev}, {day}){tag} against {commit}: skipped, {why}")
             continue
@@ -863,8 +882,8 @@ def human_dispute(r):
     mark = r.get("disputed")
     if mark is True:
         return "human mark, not computed"
-    if isinstance(mark, str) and mark.strip():
-        return "human mark, not computed: " + mark.strip()
+    if isinstance(mark, str) and strip_ws(mark):
+        return "human mark, not computed: " + strip_ws(mark)
     return None
 
 

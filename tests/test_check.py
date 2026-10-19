@@ -845,6 +845,48 @@ class RegistryReadStrictly(unittest.TestCase):
         self.assertEqual(p.returncode, 1)
 
 
+class OneWhitespaceSet(unittest.TestCase):
+    """Kama #forge 2026-10-19: one set, not two. At fb0828a 1c-1f were
+    whitespace to str.isspace (the registry edge rule) but not to Unicode
+    White_Space (id, claim, author): a registry line ending in 1f failed the
+    whole registry while an author of only 1f passed. Both now use §4.1."""
+
+    check = RegistryReadStrictly.check
+
+    def test_1f_at_registry_edge_and_1f_only_author_agree(self):
+        # Registry: a line ending in 1f is not edge whitespace; it is an id.
+        p = self.check(b"s\na\nr\nw-hand\x1f\n", witness="w-hand\x1f")
+        self.assertNotIn("begins or ends with whitespace", p.stdout)
+        self.assertNotIn("cannot be read", p.stdout)
+        self.assertNotIn("UNWITNESSED", p.stdout)
+        # Author: only 1f is not "only whitespace" either. Same answer.
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "author": "\x1f"}])
+        self.assertNotIn("only whitespace", p.stderr)
+
+    def test_white_space_at_registry_edge_and_white_space_only_author_agree(self):
+        # And where the set says yes, both say yes: U+3000 is White_Space.
+        p = self.check("a\nw-hand\u3000\n".encode(), witness="w-hand")
+        self.assertIn("line 2 begins or ends with whitespace ('w-hand\\u3000')", p.stdout)
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "author": "\u3000"}])
+        self.assertIn("field 'author' is only whitespace", p.stderr)
+
+    def test_each_1c_to_1f_is_not_registry_edge_whitespace(self):
+        for ch in "\x1c\x1d\x1e\x1f":
+            with self.subTest(ch=hex(ord(ch))):
+                p = self.check(f"s\na\nr\n{ch}w-hand\n".encode(), witness=ch + "w-hand")
+                self.assertNotIn("begins or ends with whitespace", p.stdout)
+                self.assertNotIn("UNWITNESSED", p.stdout)
+
+    def test_checker_has_one_definition(self):
+        # No second whitespace set: no isspace, no bare strip()/split(), no \s.
+        import re
+        code = [l for l in CHECK.read_text(encoding="utf-8").splitlines()
+                if not l.lstrip().startswith("#")]
+        for pattern in (r"\.isspace\(", r"\.strip\(\)", r"\.split\(\)", r"\\s"):
+            with self.subTest(pattern=pattern):
+                self.assertEqual([l for l in code if re.search(pattern, l)], [])
+
+
 class Gap10NewRequiredFields(unittest.TestCase):
     def test_missing_v02_fields_warn_by_default(self):
         p = run([receipt("r-1", v02=False, sha256=sha(RAW))])
