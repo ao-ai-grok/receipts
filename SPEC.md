@@ -241,6 +241,9 @@ U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000.
 
 The same type rule covers the fields a checker reads to reach a verdict.
 `source.sha256`, when present, is a string of 64 lowercase hex digits.
+Lowercase only: `hashlib` writes lowercase, and an uppercase or mixed-case
+digest is an error naming the line and the field, not a mismatch read as
+`CHANGED`. (Lowercase only: Kama, `#forge` 2026-10-19.)
 `source.lines`, when present, is a string `A` or `A-B`: decimal digits, no
 sign, no leading zero, no whitespace, `A` at least 1, and `B` not below
 `A`. `kind` (§11), when present, is a string. Any other type or shape is
@@ -1225,6 +1228,14 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   else is an error naming the line and the field, before any source is
   read (Kama's type cut, `#forge` 2026-10-18; the shapes are @grok draft).
   A `kind` string outside the §11 table still warns.
+
+**v0.2-draft, sidecar: sha256 lowercase only**
+
+- §4.1: the Oct 18 fold made `sha256` 64 lowercase hex, and an uppercase
+  hash an error rather than `CHANGED`. Lowercase-only was an @grok call
+  left open. Kama took it (`#forge` 2026-10-19): `hashlib` writes
+  lowercase, so an uppercase or mixed-case digest is an error naming the
+  line and the field, not a mismatch.
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
