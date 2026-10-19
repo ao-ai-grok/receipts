@@ -237,10 +237,23 @@ whitespace, is an error naming the line and the field. An author who names
 nobody is a claim with no one behind it. (Kama, `#forge` 2026-10-18.)
 Whitespace here is the Unicode `White_Space` set: `09`–`0d`, `20`, U+0085,
 U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000.
-(@grok draft.)
+(@grok draft.) It is the one definition of whitespace in this draft: the
+registry's edge-whitespace rule (§11.3) uses the same set. `1c`–`1f` are
+not in it, though Python's `str.isspace` counts them, so a registry line
+ending in `1f` is not edge whitespace, just as an `author` of only `1f` is
+not only whitespace. (One set, not two: Kama, `#forge` 2026-10-19.)
+`id`, `claim`, and `author` also contain no control character: a C0
+control (U+0000–U+001F) or DEL (U+007F) anywhere in one is an error naming
+the line and the field. That includes `09`, `0a`, and `0d`, so a tab or a
+line break inside a claim is an error too. (C0: Kama, `#forge`
+2026-10-19. DEL: @grok draft. It is the one ASCII control outside C0, and
+it prints nothing a reader can check. C1, U+0080–U+009F, is not cut here.)
 
 The same type rule covers the fields a checker reads to reach a verdict.
 `source.sha256`, when present, is a string of 64 lowercase hex digits.
+Lowercase only: `hashlib` writes lowercase, and an uppercase or mixed-case
+digest is an error naming the line and the field, not a mismatch read as
+`CHANGED`. (Lowercase only: Kama, `#forge` 2026-10-19.)
 `source.lines`, when present, is a string `A` or `A-B`: decimal digits, no
 sign, no leading zero, no whitespace, `A` at least 1, and `B` not below
 `A`. `kind` (§11), when present, is a string. Any other type or shape is
@@ -818,7 +831,9 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   stays in its line; each line is strict UTF-8; a leading BOM is an error on
   line 1. An identifier is its line exactly. Nothing is stripped, and a line
   that begins or ends with whitespace (a trailing `0d` included) is an error
-  naming the line. Any such error is a registry that cannot be read, and the
+  naming the line. Whitespace is the §4.1 `White_Space` set, the same one
+  `id`, `claim`, and `author` are checked against (Kama, `#forge`
+  2026-10-19). Any such error is a registry that cannot be read, and the
   reason names the registry line. (Kama's registry cut, `#forge`
   2026-10-12; whitespace-as-error is @grok draft.) So a CRLF registry fails
   whole: its first identifier line ends in `0d`, and the whole registry
@@ -1226,6 +1241,34 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   read (Kama's type cut, `#forge` 2026-10-18; the shapes are @grok draft).
   A `kind` string outside the §11 table still warns.
 
+**v0.2-draft, sidecar: sha256 lowercase only**
+
+- §4.1: the Oct 18 fold made `sha256` 64 lowercase hex, and an uppercase
+  hash an error rather than `CHANGED`. Lowercase-only was an @grok call
+  left open. Kama took it (`#forge` 2026-10-19): `hashlib` writes
+  lowercase, so an uppercase or mixed-case digest is an error naming the
+  line and the field, not a mismatch.
+
+**v0.2-draft, whitespace: one set, not two**
+
+- §4.1 / §11.3: `id`, `claim`, and `author` were checked against Unicode
+  `White_Space`, and the registry's edge rule against Python
+  `str.isspace`. The two differ on `1c`–`1f`: a registry line ending in
+  `1f` failed the whole registry as edge whitespace, while an `author` of
+  only `1f` passed. Now the registry uses `White_Space` too, and so does
+  every other whitespace call the reference checker makes (Kama, `#forge`
+  2026-10-19).
+
+**v0.2-draft, sidecar: no control characters in id, claim, author**
+
+- §4.1: `author` `"a\u0000b"` and an `id` with `1b` in it checked `OK`.
+  An author of only `1f` passed as non-empty and not whitespace. Now a C0
+  control (U+0000–U+001F) anywhere in `id`, `claim`, or `author` is an
+  error naming the line and the field (Kama, `#forge` 2026-10-19), and so
+  is DEL, U+007F (@grok draft). Tab and line breaks are C0, so they are
+  cut in these three fields as well. The only-whitespace check still runs
+  first.
+
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
 - §4.1 line-range bytes: lines were split with Python `str.splitlines`,
@@ -1419,7 +1462,7 @@ still history in DECISIONS.md, and each still has its source in Appendix B.
 ## Appendix B. Fold sources
 
 The **Source:** line of each closed entry in DECISIONS.md, quoted verbatim
-(whitespace folded) at `695b2ce`. The `#forge` posts a §1–§11 citation
+(whitespace folded; whitespace is the §4.1 set) at `695b2ce`. The `#forge` posts a §1–§11 citation
 folds are these. DECISIONS.md wins on any difference;
 `tools/check.py --coverage` reports one.
 
