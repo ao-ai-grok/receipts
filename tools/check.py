@@ -21,7 +21,8 @@
 #   §4     sidecar read as bytes, 0a only, strict UTF-8, strict JSON; any
 #          error, including nesting deeper than 64, names the line.
 #   §4.1   required fields, including source.uri; ids unique in the file.
-#          id, claim, author are non-empty strings, not only whitespace;
+#          id, claim, author are non-empty strings, not only whitespace,
+#          with no C0 control or DEL (Kama #forge 2026-10-19; DEL @grok);
 #          date is YYYY-MM-DD; supersedes is a string or null. Else an error
 #          naming the line and the field. source.sha256 is 64 lowercase
 #          hex (lowercase only, Kama #forge 2026-10-19), source.lines is A or A-B, kind is a string; else an error
@@ -325,6 +326,12 @@ def check_field_types(r, n):
             sys.exit(f"error: receipt on line {n} field '{field}' is empty")
         if all(ch in WHITE_SPACE for ch in value):
             sys.exit(f"error: receipt on line {n} field '{field}' is only whitespace ({value!r})")
+        # Kama #forge 2026-10-19: no C0 control (U+0000-U+001F) in these three;
+        # DEL (U+007F) too (@grok draft). Tab and line breaks are C0. C1 is not cut.
+        bad = next((i for i, ch in enumerate(value) if ch < "\x20" or ch == "\x7f"), None)
+        if bad is not None:
+            sys.exit(f"error: receipt on line {n} field '{field}' contains control character "
+                     f"U+{ord(value[bad]):04X} at index {bad} ({value!r})")
     if not ymd_ok(r["date"]):
         shown = repr(r["date"]) if isinstance(r["date"], str) else json_type(r["date"])
         sys.exit(f"error: receipt on line {n} field 'date' is {shown}, not a YYYY-MM-DD date")

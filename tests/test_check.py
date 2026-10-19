@@ -437,6 +437,49 @@ class CoreStringsNameSomething(unittest.TestCase):
         self.assertNamed(p, 1, "author", "only whitespace")
 
 
+class ControlCharacters(unittest.TestCase):
+    """Kama #forge 2026-10-19: a C0 control (U+0000-U+001F) in id, claim or
+    author is an error naming line and field. DEL (U+007F) too: @grok draft.
+    At fb0828a author "a\\u0000b", an id with 1b, and claim "a\\tb" checked OK."""
+
+    def assertNamed(self, p, line, field, what):
+        self.assertIn(f"error: receipt on line {line} field '{field}' {what}", p.stderr)
+        self.assertNotIn("[  OK   ]", p.stdout)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_nul_in_author(self):
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "author": "a\x00b"}])
+        self.assertNamed(p, 1, "author", "contains control character U+0000 at index 1")
+
+    def test_escape_in_id_on_line_2(self):
+        p = run([receipt("r-1", sha256=sha(RAW)), {**receipt("r-2", sha256=sha(RAW)), "id": "r\x1b2"}])
+        self.assertNamed(p, 2, "id", "contains control character U+001B at index 1")
+
+    def test_tab_and_newline_in_claim(self):  # C0 includes 09, 0a, 0d
+        for ch in "\t\n\r":
+            with self.subTest(ch=hex(ord(ch))):
+                p = run([{**receipt("r-1", sha256=sha(RAW)), "claim": "a" + ch + "b"}])
+                self.assertNamed(p, 1, "claim", f"contains control character U+{ord(ch):04X} at index 1")
+
+    def test_every_c0_and_del(self):
+        for cp in [*range(0x20), 0x7F]:
+            with self.subTest(cp=hex(cp)):
+                p = run([{**receipt("r-1", sha256=sha(RAW)), "author": "x" + chr(cp)}])
+                self.assertNamed(p, 1, "author", f"contains control character U+{cp:04X}")
+
+    def test_c1_and_printable_neighbours_still_pass(self):  # C1 is not cut
+        for value in ("x\x80y", "x\x85y", "x\x9fy", "a b", "x~y"):
+            with self.subTest(value=value):
+                p = run([{**receipt("r-1", sha256=sha(RAW)), "author": value}])
+                self.assertIn("[  OK   ] r-1", p.stdout)
+                self.assertEqual(p.returncode, 0)
+
+    def test_only_whitespace_is_still_named_as_such(self):
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "claim": "\t\r\n"}])
+        self.assertNamed(p, 1, "claim", "is only whitespace")
+
+
 class SourceAndKindTypes(unittest.TestCase):
     """Kama #forge 2026-10-18 type cut: sha256 42 and kind ["read"] were
     TypeError tracebacks; lines "abc" read UNREADABLE. Each is now an error
@@ -859,9 +902,11 @@ class OneWhitespaceSet(unittest.TestCase):
         self.assertNotIn("begins or ends with whitespace", p.stdout)
         self.assertNotIn("cannot be read", p.stdout)
         self.assertNotIn("UNWITNESSED", p.stdout)
-        # Author: only 1f is not "only whitespace" either. Same answer.
+        # Author: only 1f is not "only whitespace" either. Same answer. (It
+        # is a C0 control, which id/claim/author refuse: ControlCharacters.)
         p = run([{**receipt("r-1", sha256=sha(RAW)), "author": "\x1f"}])
         self.assertNotIn("only whitespace", p.stderr)
+        self.assertIn("field 'author' contains control character U+001F", p.stderr)
 
     def test_white_space_at_registry_edge_and_white_space_only_author_agree(self):
         # And where the set says yes, both say yes: U+3000 is White_Space.
