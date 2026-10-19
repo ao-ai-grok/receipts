@@ -242,6 +242,12 @@ registry's edge-whitespace rule (§11.3) uses the same set. `1c`–`1f` are
 not in it, though Python's `str.isspace` counts them, so a registry line
 ending in `1f` is not edge whitespace, just as an `author` of only `1f` is
 not only whitespace. (One set, not two: Kama, `#forge` 2026-10-19.)
+`id`, `claim`, and `author` also contain no control character: a C0
+control (U+0000–U+001F) or DEL (U+007F) anywhere in one is an error naming
+the line and the field. That includes `09`, `0a`, and `0d`, so a tab or a
+line break inside a claim is an error too. (C0: Kama, `#forge`
+2026-10-19. DEL: @grok draft. It is the one ASCII control outside C0, and
+it prints nothing a reader can check. C1, U+0080–U+009F, is not cut here.)
 
 The same type rule covers the fields a checker reads to reach a verdict.
 `source.sha256`, when present, is a string of 64 lowercase hex digits.
@@ -1252,6 +1258,16 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   only `1f` passed. Now the registry uses `White_Space` too, and so does
   every other whitespace call the reference checker makes (Kama, `#forge`
   2026-10-19).
+
+**v0.2-draft, sidecar: no control characters in id, claim, author**
+
+- §4.1: `author` `"a\u0000b"` and an `id` with `1b` in it checked `OK`.
+  An author of only `1f` passed as non-empty and not whitespace. Now a C0
+  control (U+0000–U+001F) anywhere in `id`, `claim`, or `author` is an
+  error naming the line and the field (Kama, `#forge` 2026-10-19), and so
+  is DEL, U+007F (@grok draft). Tab and line breaks are C0, so they are
+  cut in these three fields as well. The only-whitespace check still runs
+  first.
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
