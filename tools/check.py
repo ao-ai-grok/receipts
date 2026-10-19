@@ -24,7 +24,7 @@
 #          id, claim, author are non-empty strings, not only whitespace;
 #          date is YYYY-MM-DD; supersedes is a string or null. Else an error
 #          naming the line and the field. source.sha256 is 64 lowercase
-#          hex, source.lines is A or A-B, kind is a string; else an error
+#          hex (lowercase only, Kama #forge 2026-10-19), source.lines is A or A-B, kind is a string; else an error
 #          naming the line and the field, before any source is read.
 #          sha256 is compared to the bytes actually hashed: the source.lines
 #          region when that narrowing was applied under form_used, otherwise
@@ -316,6 +316,7 @@ def check_field_types(r, n):
 
 
 SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+SHA256_ANY_CASE = re.compile(r"[0-9a-fA-F]{64}")
 LINES_SHAPE = re.compile(r"([1-9][0-9]*)(?:-([1-9][0-9]*))?")  # ASCII digits only; not int()
 
 
@@ -333,8 +334,13 @@ def check_source_types(r, n):
         sys.exit(f"error: receipt on line {n} field 'kind' is {json_type(r['kind'])}, not a string")
     src = r["source"]
     if "sha256" in src and not (isinstance(src["sha256"], str) and SHA256_HEX.fullmatch(src["sha256"])):
+        # Lowercase only (Kama #forge 2026-10-19): hashlib writes lowercase, so
+        # an uppercase or mixed-case digest is an error, never folded and never
+        # compared, so it cannot read as a CHANGED source.
+        case = (": uppercase hex is not folded or compared (lowercase only)"
+                if isinstance(src["sha256"], str) and SHA256_ANY_CASE.fullmatch(src["sha256"]) else "")
         sys.exit(f"error: receipt on line {n} field 'source.sha256' is {shown(src['sha256'])}, "
-                 "not 64 lowercase hex digits")
+                 f"not 64 lowercase hex digits{case}")
     if "lines" in src and not lines_ok(src["lines"]):
         sys.exit(f"error: receipt on line {n} field 'source.lines' is {shown(src['lines'])}, "
                  "not A or A-B (line numbers from 1, no leading zero, B not below A)")

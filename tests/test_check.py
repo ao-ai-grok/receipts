@@ -460,6 +460,21 @@ class SourceAndKindTypes(unittest.TestCase):
         p = run([receipt("r-1", sha256=sha(RAW).upper())])
         self.assertNamed(p, "source.sha256", repr(sha(RAW).upper()) + ", not 64 lowercase hex digits")
 
+    def test_sha256_uppercase_names_line_and_field_not_a_mismatch(self):
+        # Kama #forge 2026-10-19: lowercase only. Line 2, mixed case, and a
+        # source that did change: still the receipt's error, never CHANGED.
+        mixed = sha(b"other bytes")[:32] + sha(b"other bytes")[32:].upper()
+        p = run([receipt("r-1", sha256=sha(RAW)), receipt("r-2", sha256=mixed)])
+        self.assertNamed(p, "source.sha256", repr(mixed) + ", not 64 lowercase hex digits: "
+                         "uppercase hex is not folded or compared (lowercase only)", line=2)
+        self.assertNotIn("CHANGED", p.stdout + p.stderr)
+        self.assertNotIn("mismatch", p.stdout + p.stderr)
+
+    def test_sha256_not_hex_is_not_called_uppercase(self):
+        p = run([receipt("r-1", sha256="G" * 64)])
+        self.assertNamed(p, "source.sha256", repr("G" * 64) + ", not 64 lowercase hex digits")
+        self.assertNotIn("uppercase", p.stderr)
+
     def test_sha256_null(self):
         p = run([receipt("r-1", sha256=None)])
         self.assertNamed(p, "source.sha256", "null, not 64 lowercase hex digits")
