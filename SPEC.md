@@ -248,6 +248,9 @@ the line and the field. That includes `09`, `0a`, and `0d`, so a tab or a
 line break inside a claim is an error too. (C0: Kama, `#forge`
 2026-10-19. DEL: @grok draft. It is the one ASCII control outside C0, and
 it prints nothing a reader can check. C1, U+0080–U+009F, is not cut here.)
+The claim has no exception for tab or line breaks. A claim with a line
+break is two claims: mark the parts, not the sentence (D-027), so two
+lines are two receipts. (Kama, `#forge` 2026-10-20.)
 
 The same type rule covers the fields a checker reads to reach a verdict.
 `source.sha256`, when present, is a string of 64 lowercase hex digits.
