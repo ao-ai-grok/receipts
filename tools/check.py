@@ -69,7 +69,11 @@
 #          line exactly, and edge whitespace (a trailing 0d too) is an error
 #          naming the line; whitespace is the §4.1 White_Space set that
 #          id, claim, author use, not isspace (Kama #forge 2026-10-19).
-#          Any such error: registry cannot be read.
+#          An id line with a C0 control or DEL is an error naming the line
+#          (Kama #forge 2026-10-20). Any such error: registry cannot be read.
+#          subject, authorizer, reader, witness: a string with a C0 control
+#          or DEL is an error naming the line and field (Kama #forge
+#          2026-10-20; checked whenever present, @grok draft).
 #          Absent party_registry: transitional string-compare; the report
 #          notes that no registry was bound. window is YYYY-MM-DD/YYYY-MM-DD
 #          and is not checked against a time. subject does not make a receipt
@@ -314,6 +318,21 @@ def json_type(value):
     return next(name for t, name in JSON_TYPES if isinstance(value, t))
 
 
+PARTY_FIELDS = ("subject", "authorizer", "reader", "witness")  # §11.3
+
+
+def control_at(value):
+    """Index of the first C0 control or DEL in value (§4.1), or None."""
+    return next((i for i, ch in enumerate(value) if ch < "\x20" or ch == "\x7f"), None)
+
+
+def refuse_control(value, n, field):
+    bad = control_at(value)
+    if bad is not None:
+        sys.exit(f"error: receipt on line {n} field '{field}' contains control character "
+                 f"U+{ord(value[bad]):04X} at index {bad} ({value!r})")
+
+
 def check_field_types(r, n):
     """Core field types (§4.1; Kama, #forge 2026-10-16). Presence is not enough."""
     for field in ("id", "claim", "author"):
@@ -328,10 +347,15 @@ def check_field_types(r, n):
             sys.exit(f"error: receipt on line {n} field '{field}' is only whitespace ({value!r})")
         # Kama #forge 2026-10-19: no C0 control (U+0000-U+001F) in these three;
         # DEL (U+007F) too (@grok draft). Tab and line breaks are C0. C1 is not cut.
-        bad = next((i for i, ch in enumerate(value) if ch < "\x20" or ch == "\x7f"), None)
-        if bad is not None:
-            sys.exit(f"error: receipt on line {n} field '{field}' contains control character "
-                     f"U+{ord(value[bad]):04X} at index {bad} ({value!r})")
+        # No exception for the claim: a claim with a line break is two claims
+        # (D-027; Kama #forge 2026-10-20).
+        refuse_control(value, n, field)
+    # Kama #forge 2026-10-20: the same rule on the §11.3 party slots, so "a"
+    # and "a" + 00 are not two parties. Whenever present and a string, any
+    # kind (@grok draft); a non-string witness still reads UNWITNESSED.
+    for field in PARTY_FIELDS:
+        if isinstance(r.get(field), str):
+            refuse_control(r[field], n, field)
     if not ymd_ok(r["date"]):
         shown = repr(r["date"]) if isinstance(r["date"], str) else json_type(r["date"])
         sys.exit(f"error: receipt on line {n} field 'date' is {shown}, not a YYYY-MM-DD date")
@@ -553,6 +577,10 @@ def load_party_registry(base: Path, uri):
         if line[0] in WHITE_SPACE or line[-1] in WHITE_SPACE:  # §4.1 set, not isspace
             return None, (f"{where} {n} begins or ends with whitespace ({line!r}), "
                           f"not stripped, {unread}")
+        bad = control_at(line)  # §4.1 control rule on ids (Kama #forge 2026-10-20)
+        if bad is not None:
+            return None, (f"{where} {n} contains control character U+{ord(line[bad]):04X} "
+                          f"at index {bad} ({line!r}), {unread}")
         ids.add(line)
     return ids, None
 

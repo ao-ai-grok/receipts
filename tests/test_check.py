@@ -479,6 +479,94 @@ class ControlCharacters(unittest.TestCase):
         p = run([{**receipt("r-1", sha256=sha(RAW)), "claim": "\t\r\n"}])
         self.assertNamed(p, 1, "claim", "is only whitespace")
 
+    def test_claim_with_a_line_break_is_two_claims(self):
+        # Kama #forge 2026-10-20: no exception for the claim. Mark the parts,
+        # not the sentence (D-027): two lines, two receipts.
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "claim": "line one\nline two"}])
+        self.assertNamed(p, 1, "claim", "contains control character U+000A at index 8")
+        two = [{**receipt("r-1", sha256=sha(RAW)), "claim": "line one"},
+               {**receipt("r-2", sha256=sha(RAW)), "claim": "line two"}]
+        p = run(two)
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertIn("[  OK   ] r-2", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+
+class PartyControlCharacters(unittest.TestCase):
+    """Kama #forge 2026-10-20, tested at 84f0131: with no registry bound,
+    authorizer "a" and witness "a" + 00 read witnessed, exit 0; with one
+    bound, an id with 01 in the registry and as witness read OK. The §4.1
+    control rule now holds for subject, authorizer, reader, witness (error
+    naming line and field) and for registry ids (registry cannot be read,
+    naming the line). DEL as in §4.1 (@grok draft)."""
+
+    def read(self, **kw):
+        return {**receipt("r-1", sha256=sha(RAW)), "kind": "read", "subject": "s",
+                "authorizer": "a", "reader": "r", "window": "2026-09-01/2026-09-30", **kw}
+
+    def assertNamed(self, p, line, field, what):
+        self.assertIn(f"error: receipt on line {line} field '{field}' contains control character {what}",
+                      p.stderr)
+        self.assertNotIn("[", p.stdout)  # no verdict printed
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_authorizer_is_not_its_own_witness_by_one_nul(self):  # Kama case 1
+        p = run([self.read(witness="a\x00")])
+        self.assertNamed(p, 1, "witness", "U+0000 at index 1 ('a\\x00')")
+        self.assertNotIn("witness window not checked", p.stdout)
+
+    def test_registry_id_with_01_as_witness(self):  # Kama case 2
+        guests = b"s\na\nr\nw\x01\n"
+        p = RegistryReadStrictly.check(self, guests, witness="w\x01")
+        self.assertNamed(p, 1, "witness", "U+0001 at index 1")
+
+    def test_registry_line_with_01_makes_registry_unreadable(self):
+        # The witness is clean and listed; the registry line with 01 still
+        # fails the whole registry, naming its line, so no witness resolves.
+        p = RegistryReadStrictly.check(self, b"# guests\ns\na\nr\nx\x01y\nw-hand\n")
+        self.assertIn("[UNWITNESSED] r-1", p.stdout)
+        self.assertIn("party_registry 'guests.txt' line 5 contains control character U+0001 "
+                      "at index 1 ('x\\x01y'), so the registry cannot be read", p.stdout)
+        self.assertNotIn("witness window not checked", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_registry_line_with_del_or_nul(self):
+        for ch in "\x00\x7f":
+            with self.subTest(ch=hex(ord(ch))):
+                p = RegistryReadStrictly.check(self, f"s\na\nr\nw-hand\nx{ch}\n".encode())
+                self.assertIn(f"line 5 contains control character U+{ord(ch):04X} at index 1", p.stdout)
+                self.assertIn("[UNWITNESSED] r-1", p.stdout)
+                self.assertEqual(p.returncode, 1)
+
+    def test_comment_and_empty_registry_lines_are_skipped(self):  # as for whitespace
+        p = RegistryReadStrictly.check(self, b"# guests\x01\n\ns\na\nr\nw-hand\n")
+        self.assertNotIn("UNWITNESSED", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_each_party_field_names_itself(self):
+        for field in ("subject", "authorizer", "reader", "witness"):
+            for ch in "\x00\t\n\x1b\x7f":
+                with self.subTest(field=field, ch=hex(ord(ch))):
+                    p = run([receipt("r-0", sha256=sha(RAW)),
+                             self.read(**{"id": "r-1", "witness": "w-hand", field: "p" + ch})])
+                    self.assertNamed(p, 2, field, f"U+{ord(ch):04X} at index 1")
+
+    def test_checked_whatever_the_kind(self):  # @grok draft: whenever present
+        r = {**receipt("r-1", sha256=sha(RAW)), "witness": "a\x00"}
+        self.assertNamed(run([r]), 1, "witness", "U+0000 at index 1")
+
+    def test_c1_and_clean_party_ids_still_pass(self):  # C1 is not cut
+        p = run([self.read(witness="w\x85")])
+        self.assertNotIn("UNWITNESSED", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_non_string_witness_still_reads_unwitnessed(self):
+        p = run([self.read(witness=7)])
+        self.assertIn("[UNWITNESSED] r-1", p.stdout)
+        self.assertIn("witness is not a party name", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
 
 class SourceAndKindTypes(unittest.TestCase):
     """Kama #forge 2026-10-18 type cut: sha256 42 and kind ["read"] were
@@ -862,9 +950,12 @@ class RegistryReadStrictly(unittest.TestCase):
 
     def test_lone_0d_is_not_a_line_boundary(self):
         # str.splitlines split this into four ids, so w-hand resolved before.
+        # It is one line 1, and a 0d inside an id is a control character
+        # (Kama #forge 2026-10-20), so the registry cannot be read.
         p = self.check(b"s\ra\rr\rw-hand\n")
         self.assertIn("[UNWITNESSED] r-1", p.stdout)
-        self.assertIn("witness 'w-hand' does not resolve in party_registry", p.stdout)
+        self.assertIn("line 1 contains control character U+000D at index 1 ('s\\ra\\rr\\rw-hand')",
+                      p.stdout)
         self.assertEqual(p.returncode, 1)
 
     def test_trailing_0d_stays_in_its_line_and_names_it(self):
@@ -897,11 +988,13 @@ class OneWhitespaceSet(unittest.TestCase):
     check = RegistryReadStrictly.check
 
     def test_1f_at_registry_edge_and_1f_only_author_agree(self):
-        # Registry: a line ending in 1f is not edge whitespace; it is an id.
-        p = self.check(b"s\na\nr\nw-hand\x1f\n", witness="w-hand\x1f")
+        # Registry: a line ending in 1f is not edge whitespace. Since Kama's
+        # #forge 2026-10-20 cut it is a control character in an id, which
+        # fails the registry by that rule instead, as it fails an author.
+        p = self.check(b"s\na\nr\nw-hand\nx\x1f\n")
         self.assertNotIn("begins or ends with whitespace", p.stdout)
-        self.assertNotIn("cannot be read", p.stdout)
-        self.assertNotIn("UNWITNESSED", p.stdout)
+        self.assertIn("line 5 contains control character U+001F at index 1", p.stdout)
+        self.assertIn("[UNWITNESSED] r-1", p.stdout)
         # Author: only 1f is not "only whitespace" either. Same answer. (It
         # is a C0 control, which id/claim/author refuse: ControlCharacters.)
         p = run([{**receipt("r-1", sha256=sha(RAW)), "author": "\x1f"}])
@@ -918,9 +1011,9 @@ class OneWhitespaceSet(unittest.TestCase):
     def test_each_1c_to_1f_is_not_registry_edge_whitespace(self):
         for ch in "\x1c\x1d\x1e\x1f":
             with self.subTest(ch=hex(ord(ch))):
-                p = self.check(f"s\na\nr\n{ch}w-hand\n".encode(), witness=ch + "w-hand")
+                p = self.check(f"s\na\nr\nw-hand\n{ch}x\n".encode())
                 self.assertNotIn("begins or ends with whitespace", p.stdout)
-                self.assertNotIn("UNWITNESSED", p.stdout)
+                self.assertIn(f"line 5 contains control character U+{ord(ch):04X} at index 0", p.stdout)
 
     def test_checker_has_one_definition(self):
         # No second whitespace set: no isspace, no bare strip()/split(), no \s.
