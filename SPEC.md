@@ -248,6 +248,9 @@ the line and the field. That includes `09`, `0a`, and `0d`, so a tab or a
 line break inside a claim is an error too. (C0: Kama, `#forge`
 2026-10-19. DEL: @grok draft. It is the one ASCII control outside C0, and
 it prints nothing a reader can check. C1, U+0080–U+009F, is not cut here.)
+The claim has no exception for tab or line breaks. A claim with a line
+break is two claims: mark the parts, not the sentence (D-027), so two
+lines are two receipts. (Kama, `#forge` 2026-10-20.)
 
 The same type rule covers the fields a checker reads to reach a verdict.
 `source.sha256`, when present, is a string of 64 lowercase hex digits.
@@ -820,6 +823,12 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   `author`. It is not a time and not an object. The checker compares it
   as text with `authorizer` and with `reader`. A bare string is not enough
   on its own once a registry is in play (next bullets). (@grok draft)
+- `subject`, `authorizer`, `reader`, and `witness` take the §4.1 control
+  rule: a string value with a C0 control or DEL anywhere in it is an error
+  naming the line and the field. `"a"` and `"a"` plus `00` print alike and
+  compare unequal, so without the rule an authorizer could be its own
+  witness. (Kama, `#forge` 2026-10-20. DEL as in §4.1; checked whenever
+  the field is present, not only for `kind` `read`: @grok draft.)
 - **Registry-bound witness.** A party identifier used as `witness` MUST
   resolve in a registry of party identifiers that was fixed before the run
   by a third party who is neither the authorizer nor the witness. Trust is
@@ -838,7 +847,11 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   2026-10-12; whitespace-as-error is @grok draft.) So a CRLF registry fails
   whole: its first identifier line ends in `0d`, and the whole registry
   cannot be read. That is the same `0d` that line-range bytes keep (§4.1).
-  (Kama, `#forge` 2026-10-18.) An identifier that does not
+  (Kama, `#forge` 2026-10-18.) An identifier line with a C0 control or
+  DEL (§4.1) anywhere in it is the same kind of error: the registry cannot
+  be read, the reason names the line, and no witness resolves. Empty and
+  `#` lines are skipped, as for whitespace. (Kama, `#forge` 2026-10-20;
+  DEL @grok draft, as in §4.1.) An identifier that does not
   resolve in the named registry does not qualify as `witness`; the checker
   derives `UNWITNESSED`. The same registry SHOULD be what other party slots
   on the read (`subject`, `authorizer`, `reader`) are checked against when
@@ -1268,6 +1281,19 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   is DEL, U+007F (@grok draft). Tab and line breaks are C0, so they are
   cut in these three fields as well. The only-whitespace check still runs
   first.
+
+**v0.2-draft, reads: no control characters in party ids or registry ids**
+
+- §11.3: with no registry bound, `authorizer` `"a"` and `witness` `"a"`
+  plus `00` read witnessed, exit 0. With a registry bound, an id with `01`
+  in it, in the registry and as `witness`, read `OK`. Now `subject`,
+  `authorizer`, `reader`, and `witness` take the §4.1 control rule, an
+  error naming the line and the field, and a registry identifier line with
+  a control character makes the registry unreadable, naming the line, so
+  no witness resolves (Kama, `#forge` 2026-10-20; DEL @grok draft).
+- §4.1: no exception for the claim. A claim with a line break is two
+  claims; mark the parts, not the sentence (D-027) (Kama, `#forge`
+  2026-10-20).
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
