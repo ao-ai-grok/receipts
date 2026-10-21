@@ -829,6 +829,20 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   compare unequal, so without the rule an authorizer could be its own
   witness. (Kama, `#forge` 2026-10-20. DEL as in §4.1; checked whenever
   the field is present, not only for `kind` `read`: @grok draft.)
+- `subject`, `authorizer`, `reader`, and `witness` also take the §4.1
+  type rule: each, when present, is a JSON string, not empty and not only
+  whitespace (the §4.1 set), else an error naming the line and the field.
+  `reader` is one string, not a list. A `witness` that is present and not
+  such a string is an error, not `UNWITNESSED`: a witness of `7` is a bad
+  receipt, not a missing witness. (Kama, `#forge` 2026-10-21. Checked
+  whenever present, as for the control rule, and `null` is not a string:
+  @grok draft.)
+- Each of the four also has at least one character outside the Unicode
+  general categories Cc, Cf, and Z (Zs, Zl, Zp), else an error naming the
+  line and the field. U+200B, U+2060, U+FEFF, and U+00AD are Cf: they pass
+  the whitespace and control rules, and a `subject` of one of them alone
+  renders as nothing. A format character beside a visible one is not cut
+  here. (Lume, `#forge` 2026-10-21.)
 - **Registry-bound witness.** A party identifier used as `witness` MUST
   resolve in a registry of party identifiers that was fixed before the run
   by a third party who is neither the authorizer nor the witness. Trust is
@@ -880,9 +894,11 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   authorizer's has fixed a read on the receipt inside a window set before.
   The `authorizer` MUST NOT satisfy `witness`. If `witness` is absent or
   does not qualify, the checker derives `UNWITNESSED`. (D-030) For this
-  draft, "does not qualify" is: not a string; or equal to `authorizer`; or
-  equal to `reader`; or, when `party_registry` is present, not resolved in
-  that registry (including a registry that cannot be read). The window half
+  draft, "does not qualify" is: equal to `authorizer`; or equal to
+  `reader`; or, when `party_registry` is present, not resolved in that
+  registry (including a registry that cannot be read). A `witness` that is
+  not a string is an error, above, not a witness that does not qualify
+  (Kama, `#forge` 2026-10-21). The window half
   of D-030 is the unchecked sentence above. (@grok draft, for that split
   and the registry clause only; registry clause is the Kama `#forge`
   narrowing above.)
@@ -1294,6 +1310,21 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
 - §4.1: no exception for the claim. A claim with a line break is two
   claims; mark the parts, not the sentence (D-027) (Kama, `#forge`
   2026-10-20).
+
+**v0.2-draft, reads: party ids name someone**
+
+- §11.3: at `8e5c60d`, a `kind` `read` with no witness and `subject` and
+  `authorizer` both `""`, both `" "`, or both `7` read `OK`, exit 0. Beside
+  a real witness, `authorizer` `7`, `subject` `7`, and `reader` `["r"]`
+  each read `OK`, and `witness` `7` read `UNWITNESSED`. Now the four party
+  fields get what `id`, `claim`, and `author` got: a string, not empty, not
+  only whitespace, else an error naming the line and the field, and a
+  non-string `witness` is that error, not `UNWITNESSED` (Kama, `#forge`
+  2026-10-21).
+- §11.3: a `subject` of only U+200B read `OK`; so did a `witness` of only
+  U+2060, U+FEFF, or U+00AD. Now each party field needs one character
+  outside Cc, Cf, and Z, else an error naming the line and the field
+  (Lume, `#forge` 2026-10-21).
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
