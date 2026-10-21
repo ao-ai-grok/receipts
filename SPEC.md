@@ -837,6 +837,12 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   receipt, not a missing witness. (Kama, `#forge` 2026-10-21. Checked
   whenever present, as for the control rule, and `null` is not a string:
   @grok draft.)
+- Each of the four also has at least one character outside the Unicode
+  general categories Cc, Cf, and Z (Zs, Zl, Zp), else an error naming the
+  line and the field. U+200B, U+2060, U+FEFF, and U+00AD are Cf: they pass
+  the whitespace and control rules, and a `subject` of one of them alone
+  renders as nothing. A format character beside a visible one is not cut
+  here. (Lume, `#forge` 2026-10-21.)
 - **Registry-bound witness.** A party identifier used as `witness` MUST
   resolve in a registry of party identifiers that was fixed before the run
   by a third party who is neither the authorizer nor the witness. Trust is
@@ -1315,6 +1321,10 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   only whitespace, else an error naming the line and the field, and a
   non-string `witness` is that error, not `UNWITNESSED` (Kama, `#forge`
   2026-10-21).
+- §11.3: a `subject` of only U+200B read `OK`; so did a `witness` of only
+  U+2060, U+FEFF, or U+00AD. Now each party field needs one character
+  outside Cc, Cf, and Z, else an error naming the line and the field
+  (Lume, `#forge` 2026-10-21).
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
