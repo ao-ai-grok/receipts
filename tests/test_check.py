@@ -561,11 +561,120 @@ class PartyControlCharacters(unittest.TestCase):
         self.assertNotIn("UNWITNESSED", p.stdout)
         self.assertEqual(p.returncode, 0)
 
-    def test_non_string_witness_still_reads_unwitnessed(self):
+    def test_non_string_witness_is_an_error_not_unwitnessed(self):
+        # Was "still reads UNWITNESSED". Kama #forge 2026-10-21: a witness of
+        # 7 is a bad receipt, not a missing witness (PartyIdsNameSomeone).
         p = run([self.read(witness=7)])
-        self.assertIn("[UNWITNESSED] r-1", p.stdout)
-        self.assertIn("witness is not a party name", p.stdout)
+        self.assertIn("error: receipt on line 1 field 'witness' is a number, not a string", p.stderr)
+        self.assertNotIn("UNWITNESSED", p.stdout)
+        self.assertNotEqual(p.returncode, 0)
+
+
+class PartyIdsNameSomeone(unittest.TestCase):
+    """Kama #forge 2026-10-21, tested at 8e5c60d: kind read, no witness,
+    subject and authorizer both "", both " ", or both 7 read OK, exit 0;
+    beside a real witness, authorizer 7, subject 7 and reader ["r"] each read
+    OK. Now subject, authorizer, reader, witness are each a string, not
+    empty, not only whitespace, else an error naming line and field; a
+    non-string witness is that error, not UNWITNESSED. Lume #forge
+    2026-10-21: a party of only U+200B (Cf) passed both rules and rendered
+    as nothing; now each needs one character outside Cc, Cf and Z."""
+
+    read = PartyControlCharacters.read
+
+    def assertNamed(self, p, line, field, what):
+        self.assertIn(f"error: receipt on line {line} field '{field}' {what}", p.stderr)
+        self.assertNotIn("[", p.stdout)  # no verdict, no mark
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_kama_no_witness_empty_blank_or_7(self):  # subject == authorizer, no witness
+        for value, what in (("", "is empty"), (" ", "is only whitespace (' ')"),
+                            (7, "is a number, not a string")):
+            with self.subTest(value=value):
+                r = {**receipt("r-1", sha256=sha(RAW)), "kind": "read",
+                     "subject": value, "authorizer": value}
+                self.assertNamed(run([r]), 1, "subject", what)
+                del r["subject"]
+                self.assertNamed(run([r]), 1, "authorizer", what)
+
+    def test_kama_beside_a_real_witness(self):
+        for field, value, what in (("authorizer", 7, "is a number, not a string"),
+                                   ("subject", 7, "is a number, not a string"),
+                                   ("reader", ["r"], "is an array, not a string")):
+            with self.subTest(field=field):
+                p = run([self.read(witness="w-hand", **{field: value})])
+                self.assertNamed(p, 1, field, what)
+
+    def test_reader_is_one_string(self):
+        # §11.3: witness is compared as text with reader, so reader is one
+        # string. An array is an error whatever its elements, good or bad.
+        for value in (["r"], ["r", "q"], [], ["", 7], {"name": "r"}):
+            with self.subTest(value=value):
+                p = run([self.read(witness="w-hand", reader=value)])
+                self.assertNamed(p, 1, "reader", f"is {'an array' if isinstance(value, list) else 'an object'}, not a string")
+        p = run([self.read(witness="w-hand", reader="r")])
+        self.assertNotIn("UNWITNESSED", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_each_party_field_empty_blank_or_non_string(self):
+        for field in ("subject", "authorizer", "reader", "witness"):
+            for value, what in (("", "is empty"), ("  ", "is only whitespace ('  ')"),
+                                (7, "is a number, not a string"), (None, "is null, not a string"),
+                                (True, "is a boolean, not a string"), (["w"], "is an array, not a string")):
+                with self.subTest(field=field, value=value):
+                    p = run([receipt("r-0", sha256=sha(RAW)),
+                             self.read(**{"id": "r-1", "witness": "w-hand", field: value})])
+                    self.assertNamed(p, 2, field, what)
+
+    def test_non_string_witness_is_an_error_not_unwitnessed(self):  # with a registry too
+        p = RegistryReadStrictly.check(self, b"s\na\nr\nw-hand\n", witness=7)
+        self.assertNamed(p, 1, "witness", "is a number, not a string")
+
+    def test_absent_witness_still_reads_unwitnessed(self):  # absent is not bad
+        p = run([self.read()])
+        self.assertIn("[UNWITNESSED] r-1: read has no witness (§11.3)", p.stdout)
         self.assertEqual(p.returncode, 1)
+
+    def test_checked_whatever_the_kind(self):  # @grok draft: whenever present
+        r = {**receipt("r-1", sha256=sha(RAW)), "witness": 7}
+        self.assertNamed(run([r]), 1, "witness", "is a number, not a string")
+        r = {**receipt("r-1", sha256=sha(RAW)), "subject": "\u200b"}
+        self.assertNamed(run([r]), 1, "subject", "has no character outside Cc, Cf and Z")
+
+    def test_lume_format_characters_only(self):
+        for field in ("subject", "authorizer", "reader", "witness"):
+            for value in ("\u200b", "\u2060", "\ufeff", "\u00ad", "\u200b\u2060", "\u200b \u00ad"):
+                with self.subTest(field=field, value=value):
+                    p = run([self.read(**{"witness": "w-hand", field: value})])
+                    self.assertNamed(p, 1, field, f"has no character outside Cc, Cf and Z ({value!r})")
+
+    def test_c1_only_is_not_a_name(self):  # Cc includes C1; the control rule does not cut it
+        p = run([self.read(witness="\x80")])
+        self.assertNamed(p, 1, "witness", "has no character outside Cc, Cf and Z ('\\x80')")
+
+    def test_nbsp_and_ideographic_space_only_are_whitespace(self):  # Z, caught first as whitespace
+        for value in ("\u00a0", "\u3000", "\u2028", "\u00a0\u3000"):
+            with self.subTest(value=value):
+                p = run([self.read(subject=value, witness="w-hand")])
+                self.assertNamed(p, 1, "subject", f"is only whitespace ({value!r})")
+
+    def test_name_with_an_embedded_format_character_still_passes(self):
+        # Lume's cut asks for one visible character, not none hidden. SPEC
+        # does not cut a Cf beside a visible one (open question on #3).
+        for value in ("w\u200bhand", "\ufeffw-hand", "w-hand\u00ad", "Zoë\u2060"):
+            with self.subTest(value=value):
+                p = run([self.read(witness=value)])
+                self.assertNotIn("error", p.stderr)
+                self.assertNotIn("UNWITNESSED", p.stdout)
+                self.assertEqual(p.returncode, 0)
+
+    def test_id_claim_author_are_not_widened(self):
+        # Lume scoped the Cc/Cf/Z rule to the four party fields; id, claim and
+        # author keep their Oct 18/19 rules (open question on #3).
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "author": "\u200b"}])
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertEqual(p.returncode, 0)
 
 
 class SourceAndKindTypes(unittest.TestCase):

@@ -60,7 +60,7 @@
 #   §5.2   sampling_warrant is a line of this check-report, not a field on
 #          each receipt: the run licenses nothing about receipts it did not read.
 #   §11    kind names the class. UNWITNESSED only for kind "read" (§11.3):
-#          subject is not the authorizer, and witness is absent, not a string,
+#          subject is not the authorizer, and witness is absent,
 #          is the reader or the authorizer, or (when party_registry is set)
 #          does not resolve in that registry. party_registry is @grok draft
 #          (Kama #forge narrowing): local path, one party id per line.
@@ -71,9 +71,12 @@
 #          id, claim, author use, not isspace (Kama #forge 2026-10-19).
 #          An id line with a C0 control or DEL is an error naming the line
 #          (Kama #forge 2026-10-20). Any such error: registry cannot be read.
-#          subject, authorizer, reader, witness: a string with a C0 control
-#          or DEL is an error naming the line and field (Kama #forge
-#          2026-10-20; checked whenever present, @grok draft).
+#          subject, authorizer, reader, witness, whenever present: a string
+#          (reader one string, not a list), not empty, not only whitespace
+#          (Kama #forge 2026-10-21), no C0 control or DEL (Kama #forge
+#          2026-10-20), and one character outside Cc, Cf and Z (Lume #forge
+#          2026-10-21); else an error naming the line and field, never a
+#          mark. A non-string witness is that error, not UNWITNESSED.
 #          Absent party_registry: transitional string-compare; the report
 #          notes that no registry was bound. window is YYYY-MM-DD/YYYY-MM-DD
 #          and is not checked against a time. subject does not make a receipt
@@ -149,6 +152,7 @@ import random
 import re
 import subprocess
 import sys
+import unicodedata
 from datetime import date
 from pathlib import Path
 
@@ -319,6 +323,11 @@ def json_type(value):
 
 
 PARTY_FIELDS = ("subject", "authorizer", "reader", "witness")  # §11.3
+# Lume #forge 2026-10-21: a party needs one character outside these general
+# categories. Cf (U+200B, U+2060, U+FEFF, U+00AD ...) survives strip(), is not
+# isspace(), and is not C0, so neither of the other rules sees it. Category is
+# from this interpreter's unicodedata (its unidata_version).
+INVISIBLE = frozenset({"Cc", "Cf", "Zs", "Zl", "Zp"})
 
 
 def control_at(value):
@@ -350,12 +359,28 @@ def check_field_types(r, n):
         # No exception for the claim: a claim with a line break is two claims
         # (D-027; Kama #forge 2026-10-20).
         refuse_control(value, n, field)
-    # Kama #forge 2026-10-20: the same rule on the §11.3 party slots, so "a"
-    # and "a" + 00 are not two parties. Whenever present and a string, any
-    # kind (@grok draft); a non-string witness still reads UNWITNESSED.
+    # Kama #forge 2026-10-21: the §11.3 party slots get what id, claim and
+    # author got: a string (reader is one string, not a list), not empty, not
+    # only whitespace. A witness of 7 is a bad receipt, not a missing witness,
+    # so it is an error here, never UNWITNESSED. Kama #forge 2026-10-20: the
+    # control rule, so "a" and "a" + 00 are not two parties. Lume #forge
+    # 2026-10-21: one character outside Cc, Cf and Z, so a U+200B-only party
+    # that renders as nothing is an error. Whenever present, any kind, and
+    # null is not a string (@grok draft).
     for field in PARTY_FIELDS:
-        if isinstance(r.get(field), str):
-            refuse_control(r[field], n, field)
+        if field not in r:
+            continue
+        value = r[field]
+        if not isinstance(value, str):
+            sys.exit(f"error: receipt on line {n} field '{field}' is {json_type(value)}, not a string")
+        if value == "":
+            sys.exit(f"error: receipt on line {n} field '{field}' is empty")
+        if all(ch in WHITE_SPACE for ch in value):
+            sys.exit(f"error: receipt on line {n} field '{field}' is only whitespace ({value!r})")
+        refuse_control(value, n, field)
+        if all(unicodedata.category(ch) in INVISIBLE for ch in value):
+            sys.exit(f"error: receipt on line {n} field '{field}' has no character outside "
+                     f"Cc, Cf and Z ({value!r}); it names no one a reader can see")
     if not ymd_ok(r["date"]):
         shown = repr(r["date"]) if isinstance(r["date"], str) else json_type(r["date"])
         sys.exit(f"error: receipt on line {n} field 'date' is {shown}, not a YYYY-MM-DD date")
@@ -647,9 +672,8 @@ def derived_marks(r, today, superseded, base: Path):
             registry, reg_err = load_party_registry(base, registry_uri)
             if registry is None:
                 marks.append(("UNWITNESSED", reg_err or "party_registry not resolved (§11.3)"))
-            elif not isinstance(witness, str) or not witness:
-                why = "read has no witness (§11.3)" if not witness else "witness is not a party name (§11.3)"
-                marks.append(("UNWITNESSED", why))
+            elif witness is None:  # absent; any present non-string erred at load
+                marks.append(("UNWITNESSED", "read has no witness (§11.3)"))
             elif witness == r["authorizer"]:
                 marks.append(("UNWITNESSED", "the authorizer cannot be the witness (§11.3)"))
             elif witness == r.get("reader"):
@@ -666,9 +690,8 @@ def derived_marks(r, today, superseded, base: Path):
                                      "does not clear UNWITNESSED by itself)")
         else:
             notes.append("no party_registry bound; transitional string-compare for witness (§11.3)")
-            if not isinstance(witness, str) or not witness:
-                why = "read has no witness (§11.3)" if not witness else "witness is not a party name (§11.3)"
-                marks.append(("UNWITNESSED", why))
+            if witness is None:  # absent; any present non-string erred at load
+                marks.append(("UNWITNESSED", "read has no witness (§11.3)"))
             elif witness == r["authorizer"]:
                 marks.append(("UNWITNESSED", "the authorizer cannot be the witness (§11.3)"))
             elif witness == r.get("reader"):
