@@ -821,7 +821,8 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   (§11). (@grok draft, for the `kind` gate only.)
 - `witness` is a string: one party's identifier, the same kind of value as
   `author`. It is not a time and not an object. The checker compares it
-  as text with `authorizer` and with `reader`. A bare string is not enough
+  as text with `authorizer` and with `reader` (folded when no registry is
+  bound; see below). A bare string is not enough
   on its own once a registry is in play (next bullets). (@grok draft)
 - `subject`, `authorizer`, `reader`, and `witness` take the §4.1 control
   rule: a string value with a C0 control or DEL anywhere in it is an error
@@ -879,6 +880,33 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   `reader`. The check-report SHOULD say that no registry was bound. This
   transitional path is not the `#forge` cut; it exists so v0.1-shaped
   sidecars still check while the field name is cut. (@grok draft)
+- **Folded compare (no registry).** With no registry bound, "equal" above
+  is equal after a fold: NFKC, then case folding (Unicode full case
+  folding), then every `Default_Ignorable_Code_Point` dropped. So
+  `authorizer` `"a"` and `witness` `"a"` plus U+200B, `"a"` plus U+FEFF,
+  `"A"`, or fullwidth U+FF41 are one party, and so are `authorizer` `é`
+  (U+00E9) and `witness` `e` plus U+0301. (Kama, `#forge` 2026-10-22.)
+  The drop is `Default_Ignorable_Code_Point`, not general category Cf:
+  U+034F, U+FE00, U+180B, and U+17B4 are Mn, and U+115F and U+3164 are
+  Lo, and each beside `"a"` renders as `"a"`. (Lume, `#forge`
+  2026-10-22.) A witness equal to `authorizer` or `reader` after the fold
+  is that party, and the read is `UNWITNESSED`, as for the raw compare. A
+  witness unequal after the fold qualifies, and the check-report says, on
+  that receipt's line, that the witness is **distinct as spelled**: its
+  spelling differs, which is all the checker saw. It is not shown to be
+  someone else. Spelling cannot tell two parties apart; only a registry
+  can. Embedded format characters are not cut as the fix (Kama). The fold
+  does not catch homoglyphs: Cyrillic `а` (U+0430) beside Latin `"a"`
+  still reads distinct as spelled. That is a limit of the transitional
+  path, not a pass on the witness. With a registry bound, nothing here
+  applies: the compare is unchanged. Fold order (@grok draft): the
+  reference checker decomposes (NFKD), case-folds, drops
+  `Default_Ignorable_Code_Point`, recomposes (NFKC), and repeats until the
+  string stops changing. NFKC, case folding, and then the drop in one pass
+  is not stable: `e`, U+034F, U+0301 folds to `e` plus U+0301, which is not
+  NFKC, so it would not equal `é`. The `Default_Ignorable_Code_Point` set
+  is from the Unicode Character Database (the checker names its version).
+  (@grok draft wording, per Kama and Lume, `#forge` 2026-10-22.)
 - `window` is a string `YYYY-MM-DD/YYYY-MM-DD`: the start date, a slash,
   the end date. Both are calendar dates. The range is inclusive, and the
   start is not after the end. This draft defines no richer window. A
@@ -1325,6 +1353,22 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   U+2060, U+FEFF, or U+00AD. Now each party field needs one character
   outside Cc, Cf, and Z, else an error naming the line and the field
   (Lume, `#forge` 2026-10-21).
+
+**v0.2-draft, reads: no registry, a folded compare, distinct as spelled**
+
+- §11.3: at `9793066`, with no registry bound, `authorizer` `"a"` and
+  `witness` `"a"` plus U+200B, `"a"` plus U+FEFF, `"A"`, or fullwidth
+  U+FF41, and `authorizer` `é` (U+00E9) and `witness` `e` plus U+0301,
+  each read `OK`: the witness counted as distinct. Now `authorizer` and
+  `reader` are each compared to `witness` after NFKC, case folding, and
+  dropping invisibles, and a witness that is still unequal is reported as
+  distinct as spelled, not shown to be someone else; homoglyphs still pass
+  (Kama, `#forge` 2026-10-22).
+- §11.3: the invisibles dropped are `Default_Ignorable_Code_Point`, not
+  only Cf: `"a"` plus U+034F, U+FE00, U+180B, or U+17B4 (Mn), or U+115F
+  or U+3164 (Lo) slipped past a Cf-only drop. Each now folds to `"a"`
+  (Lume, `#forge` 2026-10-22). Fold order and repeat-until-stable are
+  @grok draft.
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
