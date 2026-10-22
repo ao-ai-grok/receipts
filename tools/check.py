@@ -78,7 +78,14 @@
 #          2026-10-21); else an error naming the line and field, never a
 #          mark. A non-string witness is that error, not UNWITNESSED.
 #          Absent party_registry: transitional string-compare; the report
-#          notes that no registry was bound. window is YYYY-MM-DD/YYYY-MM-DD
+#          notes that no registry was bound. The compare is folded (NFKD,
+#          casefold, Default_Ignorable_Code_Point dropped, NFKC, repeated
+#          until stable): authorizer or reader equal to witness after the
+#          fold is UNWITNESSED; unequal, the witness's line says it is
+#          distinct as spelled, not shown to be someone else. Homoglyphs
+#          still pass (Kama #forge 2026-10-22; Lume #forge 2026-10-22, DICP
+#          not Cf; fold order @grok draft). Registry bound: unchanged.
+#          window is YYYY-MM-DD/YYYY-MM-DD
 #          and is not checked against a time. subject does not make a receipt
 #          a read.
 #   §4.6   draft normative names, @grok's proposal, not an adopted decision.
@@ -146,6 +153,7 @@
 # verdict (Kama #forge cut, 2026-10-10). source.span is not applied.
 
 import argparse
+import bisect
 import hashlib
 import json
 import random
@@ -328,6 +336,51 @@ PARTY_FIELDS = ("subject", "authorizer", "reader", "witness")  # §11.3
 # isspace(), and is not C0, so neither of the other rules sees it. Category is
 # from this interpreter's unicodedata (its unidata_version).
 INVISIBLE = frozenset({"Cc", "Cf", "Zs", "Zl", "Zp"})
+
+
+# Default_Ignorable_Code_Point (Lume #forge 2026-10-22), as compact inclusive
+# ranges. Python's unicodedata has no such property, so the table is here.
+# Source: Unicode 15.1.0 DerivedCoreProperties.txt (2023-08-07), the version
+# that matches this checker's reference interpreter (unicodedata 15.1.0);
+# 27 lines merged to 17 ranges, 4174 code points. It is not Cf: U+034F,
+# U+FE00-FE0F, U+180B-180D, U+17B4-17B5 are Mn; U+115F-1160, U+3164, U+FFA0
+# are Lo. Cn (reserved) ranges are in the property and kept.
+DEFAULT_IGNORABLE = (
+    (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160),
+    (0x17B4, 0x17B5), (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E),
+    (0x2060, 0x206F), (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+)
+_DI_STARTS = [a for a, _ in DEFAULT_IGNORABLE]
+
+
+def default_ignorable(ch):
+    """ch is a Default_Ignorable_Code_Point (Unicode 15.1.0 table above)."""
+    i = bisect.bisect_right(_DI_STARTS, ord(ch)) - 1
+    return i >= 0 and ord(ch) <= DEFAULT_IGNORABLE[i][1]
+
+
+def fold_party(value):
+    """A party string as compared with no registry bound (§11.3; Kama and
+    Lume #forge 2026-10-22): NFKC, casefold, Default_Ignorable dropped.
+
+    Order (@grok draft): NFKD, casefold, drop, NFKC, repeated until the
+    string stops changing. NFKC, casefold, drop in one pass is not stable:
+    "e" U+034F U+0301 drops to "e" U+0301, which is not NFKC and so would
+    not equal U+00E9. Decomposing first lets the drop happen between a base
+    and its mark, and the closing NFKC recompose; the loop covers casefold
+    output that NFKC changes again. Spelling only: homoglyphs (Cyrillic
+    U+0430 for "a") do not fold together, and are not meant to here.
+    """
+    for _ in range(8):  # one pass is stable for every code point tested; bound the rest
+        folded = unicodedata.normalize("NFKD", value).casefold()
+        folded = unicodedata.normalize(
+            "NFKC", "".join(ch for ch in folded if not default_ignorable(ch)))
+        if folded == value:
+            break
+        value = folded
+    return value
 
 
 def control_at(value):
@@ -690,13 +743,24 @@ def derived_marks(r, today, superseded, base: Path):
                                      "does not clear UNWITNESSED by itself)")
         else:
             notes.append("no party_registry bound; transitional string-compare for witness (§11.3)")
+            # Kama #forge 2026-10-22: spelling can't tell two parties apart, so
+            # compare as folded (NFKC, casefold, invisibles dropped; Lume: the
+            # drop is Default_Ignorable_Code_Point, not Cf). Equal: that party.
+            # Unequal: distinct as spelled, and only that. Homoglyphs pass.
+            folded = fold_party(witness) if witness is not None else None
+            how = lambda slot: ("" if witness == r.get(slot) else
+                                f"; {witness!r} and {r.get(slot)!r} are one spelling once "
+                                "folded (NFKC, casefold, Default_Ignorable dropped)")
             if witness is None:  # absent; any present non-string erred at load
                 marks.append(("UNWITNESSED", "read has no witness (§11.3)"))
-            elif witness == r["authorizer"]:
-                marks.append(("UNWITNESSED", "the authorizer cannot be the witness (§11.3)"))
-            elif witness == r.get("reader"):
-                marks.append(("UNWITNESSED", "the reader cannot be the witness (§11.3)"))
+            elif folded == fold_party(r["authorizer"]):
+                marks.append(("UNWITNESSED", f"the authorizer cannot be the witness (§11.3){how('authorizer')}"))
+            elif "reader" in r and folded == fold_party(r["reader"]):
+                marks.append(("UNWITNESSED", f"the reader cannot be the witness (§11.3){how('reader')}"))
             else:
+                notes.append(f"witness {witness!r} is distinct as spelled (folded: NFKC, casefold, "
+                             "Default_Ignorable dropped), not shown to be someone else; homoglyphs "
+                             "still pass; only a party_registry can tell parties apart (§11.3)")
                 notes.append("witness window not checked (no witness fixing time in the file)")
     return marks, notes
 

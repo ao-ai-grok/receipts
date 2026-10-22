@@ -968,6 +968,93 @@ class Gap9DerivedMarks(unittest.TestCase):
         self.assertIn("SPEC v0.2-draft subset", p.stdout)
 
 
+class FoldedWitnessNoRegistry(unittest.TestCase):
+    """Kama #forge 2026-10-22, tested at 9793066 with no registry bound:
+    authorizer "a" vs witness a+U+200B, a+U+FEFF, "A", fullwidth U+FF41, and
+    authorizer U+00E9 vs witness e+U+0301 all read OK, the witness counted as
+    distinct. Now authorizer and reader are compared to witness after NFKC,
+    casefold and dropping invisibles, and an unequal witness is "distinct as
+    spelled". Lume #forge 2026-10-22: the drop is Default_Ignorable_Code_Point,
+    not Cf (Mn and Lo examples below). Homoglyphs still pass."""
+
+    read = Gap9DerivedMarks.read
+    KAMA = (("a", "a\u200b"), ("a", "a\ufeff"), ("a", "A"), ("a", "\uff41"),
+            ("\u00e9", "e\u0301"))
+    LUME = ("a\u034f", "a\ufe00", "a\u180b", "a\u17b4", "a\u115f", "a\u3164")
+
+    def assertSelfWitnessed(self, p, slot):
+        self.assertIn(f"[UNWITNESSED] r-1: the {slot} cannot be the witness (§11.3); ", p.stdout)
+        self.assertIn("one spelling once folded", p.stdout)
+        self.assertNotIn("distinct as spelled", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_kama_five_are_the_authorizer(self):
+        for authorizer, witness in self.KAMA:
+            with self.subTest(witness=witness):
+                self.assertSelfWitnessed(run([self.read(authorizer=authorizer, witness=witness)]),
+                                         "authorizer")
+
+    def test_lume_six_default_ignorables_are_the_authorizer(self):
+        for witness in self.LUME:
+            with self.subTest(witness=witness):
+                self.assertSelfWitnessed(run([self.read(witness=witness)]), "authorizer")
+
+    def test_reader_is_folded_too(self):
+        for witness in ("R", "r\u200b", "\uff52", "r\u3164"):
+            with self.subTest(witness=witness):
+                self.assertSelfWitnessed(run([self.read(witness=witness)]), "reader")
+
+    def test_raw_equal_keeps_the_old_line(self):
+        p = run([self.read(witness="a")])
+        self.assertIn("[UNWITNESSED] r-1: the authorizer cannot be the witness (§11.3)\n", p.stdout)
+
+    def test_drop_between_base_and_mark_recomposes(self):  # one-pass NFKC, casefold, drop is not stable
+        for witness in ("e\u034f\u0301", "E\u200b\u0301", "e\u3164\u0301"):
+            with self.subTest(witness=witness):
+                p = run([self.read(authorizer="\u00e9", witness=witness)])
+                self.assertSelfWitnessed(p, "authorizer")
+
+    def test_homoglyph_is_distinct_as_spelled(self):
+        p = run([self.read(witness="\u0430")])  # Cyrillic a, not Latin a
+        self.assertNotIn("UNWITNESSED", p.stdout)
+        self.assertIn("witness '\u0430' is distinct as spelled", p.stdout)
+        self.assertIn("not shown to be someone else; homoglyphs still pass", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_distinct_witness_says_distinct_as_spelled(self):
+        p = run([self.read(witness="w-hand")])
+        self.assertIn("note: witness 'w-hand' is distinct as spelled", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_registry_bound_compare_is_unchanged(self):
+        # With a registry bound, nothing is folded: "A" in the registry is
+        # another id than "a", as before (only the registry tells them apart).
+        p = RegistryBoundWitness.run_with_registry(
+            self, [RegistryBoundWitness.read(self, witness="A")], "s\na\nr\nA\n")
+        self.assertNotIn("UNWITNESSED", p.stdout)
+        self.assertNotIn("distinct as spelled", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_fold_and_table(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        sys.dont_write_bytecode, was = True, sys.dont_write_bytecode  # no tools/__pycache__
+        try:
+            import check
+        finally:
+            sys.path.pop(0)
+            sys.dont_write_bytecode = was
+        for ch in "\u00ad\u034f\u115f\u1160\u17b4\u180b\u200b\u2060\u3164\ufe0f\ufeff\uffa0\U000e0001\U000e0100":
+            self.assertTrue(check.default_ignorable(ch), hex(ord(ch)))
+        for ch in "a\u0301\u0430 \u00a0\u1161\u17b6\u180a\u2010\ufe10\U000e1000":
+            self.assertFalse(check.default_ignorable(ch), hex(ord(ch)))
+        ranges = check.DEFAULT_IGNORABLE
+        self.assertTrue(all(a <= b for a, b in ranges))
+        self.assertTrue(all(b + 1 < c for (_, b), (c, _) in zip(ranges, ranges[1:])))  # sorted, merged
+        for value in ("a", "\u00e9", "e\u034f\u0301", "\ufb01", "\u1e9e", "\u0390\u0345", "\u3164\u0301"):
+            once = check.fold_party(value)
+            self.assertEqual(check.fold_party(once), once, repr(value))
+
+
 class RegistryBoundWitness(unittest.TestCase):
     """Kama #forge narrowing: witness must resolve in party_registry (§11.3)."""
 
