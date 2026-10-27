@@ -838,12 +838,38 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   receipt, not a missing witness. (Kama, `#forge` 2026-10-21. Checked
   whenever present, as for the control rule, and `null` is not a string:
   @grok draft.)
-- Each of the four also has at least one character outside the Unicode
-  general categories Cc, Cf, and Z (Zs, Zl, Zp), else an error naming the
-  line and the field. U+200B, U+2060, U+FEFF, and U+00AD are Cf: they pass
-  the whitespace and control rules, and a `subject` of one of them alone
-  renders as nothing. A format character beside a visible one is not cut
-  here. (Lume, `#forge` 2026-10-21.)
+- **Party fold.** Each of the four, when present, is then folded, in this
+  order: (1) NFKD; (2) every `Default_Ignorable_Code_Point` dropped; (3)
+  NFKC; (4) every blank-list character becomes U+0020; (5) runs of §4.1
+  whitespace become one space and edge whitespace is dropped (`fold_ws`,
+  last). The result is the party **as shown**. It MUST hold at least one
+  character of general category L or N, else an error naming the line and
+  the field. (Fold first, then look: Kama, `#forge` 2026-10-23. `fold_ws`
+  last: Kama, 2026-10-24. L or N: Lume, `#forge` 2026-10-24; Kama,
+  2026-10-25, replacing the Oct 21 outside-Cc/Cf/Z rule.) So each of these
+  alone is an error: U+200B, U+3164, U+034F, U+FE00 plus U+115F (all
+  dropped), U+2800 (blank), U+0301 or U+20DD (a mark), U+2605 or an emoji
+  (a symbol). `7` passes (Nd). A mark-only `witness` is an error, not
+  `UNWITNESSED`. The check runs before case folding: U+0345 is Mn and
+  case-folds to iota, so U+0345 alone is an error and `a` plus U+0345
+  passes (Lume, `#forge` 2026-10-25; Kama, 2026-10-26). The raw-value rules
+  above run first. Whether a read needs a witness (`subject` not
+  `authorizer`) stays a raw compare: fold toward a mark, never away from
+  one (Kama, `#forge` 2026-10-23).
+- **Blank list.** Characters that render blank but are neither
+  `White_Space` nor `Default_Ignorable_Code_Point`. The list is this
+  spec's own, and growing it is a spec change: U+2800 BRAILLE PATTERN
+  BLANK. (Lume, `#forge` 2026-10-23; Kama, `#forge` 2026-10-24.) That a
+  blank becomes a space rather than being dropped: @grok draft.
+- **Unicode version.** The fold and the L-or-N check are read at Unicode
+  15.1.0. A run whose Unicode data is any other version (exact match, not
+  at least) MUST exit non-zero with verdict `UNPINNED`, naming the version
+  it found, before it reads any party. U+0890 and U+0891 are Cf from 14.0
+  and Cn in 13.0: at 15.1 a `witness` of U+0890 alone is an error;
+  elsewhere the run is `UNPINNED`. (Kama, `#forge` 2026-10-26 /
+  2026-10-27; Lume, `#forge` 2026-10-26.) The reference checker asks
+  before it opens the sidecar, and `--coverage` reads no party and does
+  not ask (@grok draft).
 - **Registry-bound witness.** A party identifier used as `witness` MUST
   resolve in a registry of party identifiers that was fixed before the run
   by a third party who is neither the authorizer nor the witness. Trust is
@@ -881,8 +907,9 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   transitional path is not the `#forge` cut; it exists so v0.1-shaped
   sidecars still check while the field name is cut. (@grok draft)
 - **Folded compare (no registry).** With no registry bound, "equal" above
-  is equal after a fold: NFKC, then case folding (Unicode full case
-  folding), then every `Default_Ignorable_Code_Point` dropped. So
+  is equal after a fold: the party as shown, case-folded (Unicode full
+  case folding), then steps (1)–(5) of the party fold again, repeated
+  until the string stops changing. So
   `authorizer` `"a"` and `witness` `"a"` plus U+200B, `"a"` plus U+FEFF,
   `"A"`, or fullwidth U+FF41 are one party, and so are `authorizer` `é`
   (U+00E9) and `witness` `e` plus U+0301. (Kama, `#forge` 2026-10-22.)
@@ -899,14 +926,11 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   does not catch homoglyphs: Cyrillic `а` (U+0430) beside Latin `"a"`
   still reads distinct as spelled. That is a limit of the transitional
   path, not a pass on the witness. With a registry bound, nothing here
-  applies: the compare is unchanged. Fold order (@grok draft): the
-  reference checker decomposes (NFKD), case-folds, drops
-  `Default_Ignorable_Code_Point`, recomposes (NFKC), and repeats until the
-  string stops changing. NFKC, case folding, and then the drop in one pass
-  is not stable: `e`, U+034F, U+0301 folds to `e` plus U+0301, which is not
-  NFKC, so it would not equal `é`. The `Default_Ignorable_Code_Point` set
-  is from the Unicode Character Database (the checker names its version).
-  (@grok draft wording, per Kama and Lume, `#forge` 2026-10-22.)
+  applies: the compare is unchanged. Decomposing before the drop lets it
+  fall between a base and its mark: `e`, U+034F, U+0301 is `é`. Case
+  folding can leave a string that is not NFKC, hence the repeat. (@grok
+  draft wording, per Kama and Lume, `#forge` 2026-10-22.) Spaces fold too:
+  `"a  b"` and `" a b "` are `"a b"`, and `"a"` plus U+2800 is `"a"`.
 - `window` is a string `YYYY-MM-DD/YYYY-MM-DD`: the start date, a slash,
   the end date. Both are calendar dates. The range is inclusive, and the
   start is not after the end. This draft defines no richer window. A
@@ -1369,6 +1393,25 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   or U+3164 (Lo) slipped past a Cf-only drop. Each now folds to `"a"`
   (Lume, `#forge` 2026-10-22). Fold order and repeat-until-stable are
   @grok draft.
+
+**v0.2-draft, reads: fold first, then look; L or N; Unicode 15.1**
+
+- §11.3: at `95d9fcf`, a `witness` of U+3164, U+034F, or U+FE00 plus
+  U+115F read `OK`: each has a character outside Cc/Cf/Z, and each folds
+  to nothing. Now the visible rule reads the folded party, for all four
+  fields; the subject-vs-authorizer test stays raw (Kama, `#forge`
+  2026-10-23).
+- §11.3: U+2800 passed the fold, and spaces, edge or interior, kept two
+  spellings of one party apart. Now a spec-owned blank list (U+2800) and
+  `fold_ws` run last in the fold (Lume, `#forge` 2026-10-23; Kama,
+  2026-10-24).
+- §11.3: a lone U+0301 or U+20DD read as a party. Now a party needs one L
+  or N character after the fold, checked before case folding, so U+0345
+  alone errors (Lume, `#forge` 2026-10-24 / 2026-10-25; Kama, 2026-10-25 /
+  2026-10-26). Replaces the Oct 21 outside-Cc/Cf/Z rule.
+- §11.3: Unicode 15.1.0 is named; another `unidata_version` exits
+  `UNPINNED` before any party is read (Kama, `#forge` 2026-10-26 /
+  2026-10-27; Lume, `#forge` 2026-10-26).
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
