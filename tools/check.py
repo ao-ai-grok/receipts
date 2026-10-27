@@ -16,6 +16,8 @@
 # sampled receipt is OK, carries no failing mark, and is not disputed.
 # A run whose every checked receipt is UNREADABLE or UNFETCHED is a loud
 # failure: non-zero exit and a diagnostic line, not a pass.
+# A run whose Unicode data (unicodedata.unidata_version) is not 15.1.0
+# exits non-zero, UNPINNED, before the sidecar is read (§11.3).
 #
 # What this checker implements of SPEC v0.2-draft (§9 asks a tool to say):
 #   §4     sidecar read as bytes, 0a only, strict UTF-8, strict JSON; any
@@ -74,13 +76,19 @@
 #          subject, authorizer, reader, witness, whenever present: a string
 #          (reader one string, not a list), not empty, not only whitespace
 #          (Kama #forge 2026-10-21), no C0 control or DEL (Kama #forge
-#          2026-10-20), and one character outside Cc, Cf and Z (Lume #forge
-#          2026-10-21); else an error naming the line and field, never a
-#          mark. A non-string witness is that error, not UNWITNESSED.
+#          2026-10-20); else an error naming the line and field, never a
+#          mark. A non-string witness is that error, not UNWITNESSED. Then
+#          each is folded (NFKD, Default_Ignorable_Code_Point dropped,
+#          NFKC, blank list U+2800 to a space, fold_ws last) and the party
+#          as shown needs one L or N character, checked before casefold
+#          (Kama #forge 2026-10-23/24/25/26; Lume #forge 2026-10-23/24/25).
+#          subject vs authorizer stays raw. Unicode data must be 15.1.0
+#          exactly, else the run exits UNPINNED before the sidecar is read
+#          (Kama #forge 2026-10-26/27; Lume #forge 2026-10-26).
 #          Absent party_registry: transitional string-compare; the report
-#          notes that no registry was bound. The compare is folded (NFKD,
-#          casefold, Default_Ignorable_Code_Point dropped, NFKC, repeated
-#          until stable): authorizer or reader equal to witness after the
+#          notes that no registry was bound. The compare is folded (the
+#          shown form, casefold, the party fold again, until stable):
+#          authorizer or reader equal to witness after the
 #          fold is UNWITNESSED; unequal, the witness's line says it is
 #          distinct as spelled, not shown to be someone else. Homoglyphs
 #          still pass (Kama #forge 2026-10-22; Lume #forge 2026-10-22, DICP
@@ -331,11 +339,16 @@ def json_type(value):
 
 
 PARTY_FIELDS = ("subject", "authorizer", "reader", "witness")  # §11.3
-# Lume #forge 2026-10-21: a party needs one character outside these general
-# categories. Cf (U+200B, U+2060, U+FEFF, U+00AD ...) survives strip(), is not
-# isspace(), and is not C0, so neither of the other rules sees it. Category is
-# from this interpreter's unicodedata (its unidata_version).
-INVISIBLE = frozenset({"Cc", "Cf", "Zs", "Zl", "Zp"})
+
+# §11.3 Unicode version (Kama #forge 2026-10-26/27; Lume #forge 2026-10-26):
+# the fold, the L-or-N check and the table below are read at this version,
+# exactly. U+0890/U+0891 are Cf from 14.0 and Cn in 13.0.
+UNICODE_VERSION = "15.1.0"
+
+# §11.3 blank list (Lume #forge 2026-10-23; Kama #forge 2026-10-24): renders
+# blank, but is neither White_Space nor Default_Ignorable. The spec owns it.
+# Each becomes a space, so fold_ws treats it as one (@grok draft).
+BLANK = frozenset("\u2800")
 
 
 # Default_Ignorable_Code_Point (Lume #forge 2026-10-22), as compact inclusive
@@ -361,26 +374,54 @@ def default_ignorable(ch):
     return i >= 0 and ord(ch) <= DEFAULT_IGNORABLE[i][1]
 
 
-def fold_party(value):
-    """A party string as compared with no registry bound (§11.3; Kama and
-    Lume #forge 2026-10-22): NFKC, casefold, Default_Ignorable dropped.
+def _party_fold_once(value):
+    """§11.3 party fold steps 1-5: NFKD, Default_Ignorable dropped, NFKC,
+    blank list to a space, fold_ws last (Kama #forge 2026-10-24)."""
+    value = unicodedata.normalize("NFKD", value)
+    value = unicodedata.normalize("NFKC", "".join(ch for ch in value if not default_ignorable(ch)))
+    return fold_ws("".join(" " if ch in BLANK else ch for ch in value))
 
-    Order (@grok draft): NFKD, casefold, drop, NFKC, repeated until the
-    string stops changing. NFKC, casefold, drop in one pass is not stable:
-    "e" U+034F U+0301 drops to "e" U+0301, which is not NFKC and so would
-    not equal U+00E9. Decomposing first lets the drop happen between a base
-    and its mark, and the closing NFKC recompose; the loop covers casefold
-    output that NFKC changes again. Spelling only: homoglyphs (Cyrillic
-    U+0430 for "a") do not fold together, and are not meant to here.
-    """
+
+def _until_stable(step, value):
     for _ in range(8):  # one pass is stable for every code point tested; bound the rest
-        folded = unicodedata.normalize("NFKD", value).casefold()
-        folded = unicodedata.normalize(
-            "NFKC", "".join(ch for ch in folded if not default_ignorable(ch)))
+        folded = step(value)
         if folded == value:
             break
         value = folded
     return value
+
+
+def shown_party(value):
+    """The party as shown (§11.3): the party fold, no casefold. The L-or-N
+    check reads this (Lume #forge 2026-10-25: before casefold, so U+0345,
+    which casefolds to iota, alone is not a letter)."""
+    return _until_stable(_party_fold_once, value)
+
+
+def fold_party(value):
+    """A party string as compared with no registry bound (§11.3; Kama and
+    Lume #forge 2026-10-22): the shown form, casefold, the party fold again,
+    repeated until the string stops changing (@grok draft order).
+
+    Decomposing before the drop lets it fall between a base and its mark
+    ("e" U+034F U+0301 is U+00E9); casefold can leave a string that is not
+    NFKC, hence the repeat. Spelling only: homoglyphs (Cyrillic U+0430 for
+    "a") do not fold together, and are not meant to here.
+    """
+    return _until_stable(lambda v: _party_fold_once(v.casefold()), shown_party(value))
+
+
+def names_someone(value):
+    """§11.3: the party as shown holds one L or N character (Lume #forge
+    2026-10-24; Kama #forge 2026-10-25, replacing outside-Cc/Cf/Z)."""
+    return any(unicodedata.category(ch)[0] in "LN" for ch in shown_party(value))
+
+
+def unicode_pin_gap():
+    """None if this interpreter's Unicode data is the version §11.3 names,
+    else what was found (exact match, not at least)."""
+    found = unicodedata.unidata_version
+    return None if found == UNICODE_VERSION else found
 
 
 def control_at(value):
@@ -416,10 +457,11 @@ def check_field_types(r, n):
     # author got: a string (reader is one string, not a list), not empty, not
     # only whitespace. A witness of 7 is a bad receipt, not a missing witness,
     # so it is an error here, never UNWITNESSED. Kama #forge 2026-10-20: the
-    # control rule, so "a" and "a" + 00 are not two parties. Lume #forge
-    # 2026-10-21: one character outside Cc, Cf and Z, so a U+200B-only party
-    # that renders as nothing is an error. Whenever present, any kind, and
-    # null is not a string (@grok draft).
+    # control rule, so "a" and "a" + 00 are not two parties. Then the party
+    # as shown (folded, before casefold) needs one L or N character: U+200B,
+    # U+3164, U+2800, a lone U+0301, U+2605 or an emoji names no one; "7"
+    # does (Kama #forge 2026-10-23/25/26; Lume #forge 2026-10-23/24/25).
+    # Whenever present, any kind, and null is not a string (@grok draft).
     for field in PARTY_FIELDS:
         if field not in r:
             continue
@@ -431,9 +473,10 @@ def check_field_types(r, n):
         if all(ch in WHITE_SPACE for ch in value):
             sys.exit(f"error: receipt on line {n} field '{field}' is only whitespace ({value!r})")
         refuse_control(value, n, field)
-        if all(unicodedata.category(ch) in INVISIBLE for ch in value):
-            sys.exit(f"error: receipt on line {n} field '{field}' has no character outside "
-                     f"Cc, Cf and Z ({value!r}); it names no one a reader can see")
+        if not names_someone(value):
+            sys.exit(f"error: receipt on line {n} field '{field}' has no letter or number once "
+                     f"folded ({value!r} shows as {shown_party(value)!r}); it names no one a "
+                     "reader can see")
     if not ymd_ok(r["date"]):
         shown = repr(r["date"]) if isinstance(r["date"], str) else json_type(r["date"])
         sys.exit(f"error: receipt on line {n} field 'date' is {shown}, not a YYYY-MM-DD date")
@@ -745,12 +788,13 @@ def derived_marks(r, today, superseded, base: Path):
             notes.append("no party_registry bound; transitional string-compare for witness (§11.3)")
             # Kama #forge 2026-10-22: spelling can't tell two parties apart, so
             # compare as folded (NFKC, casefold, invisibles dropped; Lume: the
-            # drop is Default_Ignorable_Code_Point, not Cf). Equal: that party.
+            # drop is Default_Ignorable_Code_Point, not Cf; Kama/Lume Oct 24:
+            # U+2800 and spaces fold too). Equal: that party.
             # Unequal: distinct as spelled, and only that. Homoglyphs pass.
             folded = fold_party(witness) if witness is not None else None
             how = lambda slot: ("" if witness == r.get(slot) else
                                 f"; {witness!r} and {r.get(slot)!r} are one spelling once "
-                                "folded (NFKC, casefold, Default_Ignorable dropped)")
+                                "folded (NFKC, Default_Ignorable dropped, blanks and spaces folded, casefold)")
             if witness is None:  # absent; any present non-string erred at load
                 marks.append(("UNWITNESSED", "read has no witness (§11.3)"))
             elif folded == fold_party(r["authorizer"]):
@@ -758,9 +802,9 @@ def derived_marks(r, today, superseded, base: Path):
             elif "reader" in r and folded == fold_party(r["reader"]):
                 marks.append(("UNWITNESSED", f"the reader cannot be the witness (§11.3){how('reader')}"))
             else:
-                notes.append(f"witness {witness!r} is distinct as spelled (folded: NFKC, casefold, "
-                             "Default_Ignorable dropped), not shown to be someone else; homoglyphs "
-                             "still pass; only a party_registry can tell parties apart (§11.3)")
+                notes.append(f"witness {witness!r} is distinct as spelled (folded: NFKC, "
+                             "Default_Ignorable dropped, blanks and spaces folded, casefold), "
+                             "not shown to be someone else; homoglyphs still pass; only a party_registry can tell parties apart (§11.3)")
                 notes.append("witness window not checked (no witness fixing time in the file)")
     return marks, notes
 
@@ -1027,6 +1071,19 @@ def main():
         coverage_main(*args.coverage, pin=args.pin)
     if args.receipts_file is None:
         ap.error("a receipts file is required unless --coverage is given")
+
+    # §11.3: Unicode version first, before the sidecar is opened and so
+    # before any party is read (Kama #forge 2026-10-26/27; @grok draft: the
+    # coverage run reads no party and does not ask).
+    found = unicode_pin_gap()
+    if found is not None:
+        why = (f"this interpreter's Unicode data is {found}; SPEC §11.3 names "
+               f"{UNICODE_VERSION} (exact match); no party read")
+        print(f"receipts check — {args.receipts_file.name}")
+        print(f"\n  [UNPINNED] {why}")
+        print("check: UNPINNED")
+        print(f"error: UNPINNED: {why}", file=sys.stderr)
+        sys.exit(1)
 
     receipts, notes = load_receipts(args.receipts_file)
     base = args.receipts_file.resolve().parent

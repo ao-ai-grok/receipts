@@ -10,6 +10,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import unittest
 from pathlib import Path
 
@@ -578,7 +579,9 @@ class PartyIdsNameSomeone(unittest.TestCase):
     empty, not only whitespace, else an error naming line and field; a
     non-string witness is that error, not UNWITNESSED. Lume #forge
     2026-10-21: a party of only U+200B (Cf) passed both rules and rendered
-    as nothing; now each needs one character outside Cc, Cf and Z."""
+    as nothing; it needed one character outside Cc, Cf and Z, and since
+    Kama #forge 2026-10-25 needs one L or N character once folded
+    (FoldFirstThenLook)."""
 
     read = PartyControlCharacters.read
 
@@ -640,18 +643,18 @@ class PartyIdsNameSomeone(unittest.TestCase):
         r = {**receipt("r-1", sha256=sha(RAW)), "witness": 7}
         self.assertNamed(run([r]), 1, "witness", "is a number, not a string")
         r = {**receipt("r-1", sha256=sha(RAW)), "subject": "\u200b"}
-        self.assertNamed(run([r]), 1, "subject", "has no character outside Cc, Cf and Z")
+        self.assertNamed(run([r]), 1, "subject", "has no letter or number once folded")
 
     def test_lume_format_characters_only(self):
         for field in ("subject", "authorizer", "reader", "witness"):
             for value in ("\u200b", "\u2060", "\ufeff", "\u00ad", "\u200b\u2060", "\u200b \u00ad"):
                 with self.subTest(field=field, value=value):
                     p = run([self.read(**{"witness": "w-hand", field: value})])
-                    self.assertNamed(p, 1, field, f"has no character outside Cc, Cf and Z ({value!r})")
+                    self.assertNamed(p, 1, field, f"has no letter or number once folded ({value!r} shows as '')")
 
     def test_c1_only_is_not_a_name(self):  # Cc includes C1; the control rule does not cut it
         p = run([self.read(witness="\x80")])
-        self.assertNamed(p, 1, "witness", "has no character outside Cc, Cf and Z ('\\x80')")
+        self.assertNamed(p, 1, "witness", "has no letter or number once folded ('\\x80' shows as '\\x80')")
 
     def test_nbsp_and_ideographic_space_only_are_whitespace(self):  # Z, caught first as whitespace
         for value in ("\u00a0", "\u3000", "\u2028", "\u00a0\u3000"):
@@ -1053,6 +1056,185 @@ class FoldedWitnessNoRegistry(unittest.TestCase):
         for value in ("a", "\u00e9", "e\u034f\u0301", "\ufb01", "\u1e9e", "\u0390\u0345", "\u3164\u0301"):
             once = check.fold_party(value)
             self.assertEqual(check.fold_party(once), once, repr(value))
+
+
+class FoldFirstThenLook(unittest.TestCase):
+    """Kama #forge 2026-10-23, at 95d9fcf: a witness of U+3164, U+034F, or
+    U+FE00 + U+115F read OK; each folds to nothing. Lume #forge 2026-10-23:
+    U+2800 passed the fold; Kama 2026-10-24: spaces too, edge and interior,
+    so fold_ws runs last, and a blank list we own starts with U+2800. Lume
+    2026-10-24 / Kama 2026-10-25: a party needs one L or N character after
+    the fold (a lone U+0301 or U+20DD was a party). Lume 2026-10-25 / Kama
+    2026-10-26: checked before casefold, so U+0345 alone errors. Kama
+    2026-10-26/27, Lume 2026-10-26: Unicode 15.1.0 exactly, else UNPINNED."""
+
+    read = Gap9DerivedMarks.read
+    assertNamed = PartyIdsNameSomeone.assertNamed
+
+    def assertNoOne(self, field, value, shows=""):
+        p = run([PartyIdsNameSomeone.read(self, **{"witness": "w-hand", field: value})])
+        self.assertNamed(p, 1, field, f"has no letter or number once folded ({value!r} shows as {shows!r})")
+        self.assertNotIn("UNWITNESSED", p.stdout)
+
+    def assertSelfWitnessed(self, p, slot="authorizer"):
+        self.assertIn(f"[UNWITNESSED] r-1: the {slot} cannot be the witness (§11.3); ", p.stdout)
+        self.assertIn("one spelling once folded", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def assertPasses(self, p):
+        self.assertNotIn("error", p.stderr)
+        self.assertNotIn("UNWITNESSED", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_kama_three_fold_to_nothing_in_every_field(self):
+        for field in ("subject", "authorizer", "reader", "witness"):
+            for value in ("\u3164", "\u034f", "\ufe00\u115f"):
+                with self.subTest(field=field, value=value):
+                    self.assertNoOne(field, value)
+
+    def test_lume_braille_blank_is_on_the_blank_list(self):
+        for field in ("subject", "authorizer", "reader", "witness"):
+            with self.subTest(field=field):
+                self.assertNoOne(field, "\u2800")
+        self.assertNoOne("witness", "\u2800\u2800 \u2800")
+        self.assertSelfWitnessed(run([self.read(witness="a\u2800")]))
+        self.assertSelfWitnessed(run([self.read(authorizer="a b", witness="a\u2800b")]))
+
+    def test_edge_and_interior_spaces_fold(self):
+        for witness in (" a b", "a b ", "a  b", " a \u3000 b ", "a\u00a0b", "a\u2003\u2800 b"):
+            with self.subTest(witness=witness):
+                self.assertSelfWitnessed(run([self.read(authorizer="a b", witness=witness)]))
+        self.assertSelfWitnessed(run([self.read(witness=" r ")]), "reader")
+        p = run([self.read(authorizer="a b", witness="ab")])  # a space still splits a spelling
+        self.assertIn("distinct as spelled", p.stdout)
+        self.assertPasses(p)
+
+    def test_lone_marks_name_no_one(self):
+        for value in ("\u0301", "\u20dd", "\u0301\u20dd", "\u3164\u0301", " \u0301"):
+            with self.subTest(value=value):
+                self.assertNoOne("witness", value, unicodedata.normalize("NFKC", value.strip(" \u3164")))
+
+    def test_mark_only_witness_is_an_error_not_unwitnessed(self):
+        p = run([self.read(witness="\u0301")])
+        self.assertNamed(p, 1, "witness", "has no letter or number once folded")
+        self.assertNotIn("UNWITNESSED", p.stdout)
+
+    def test_symbol_only_and_emoji_error(self):  # Kama's cost, 2026-10-25
+        for value in ("\u2605", "\u2605\u2605", "\U0001f600", "\u2764\ufe0f", "\U0001f44d\U0001f3fd"):
+            with self.subTest(value=value):
+                p = run([self.read(witness=value)])
+                self.assertNamed(p, 1, "witness", "has no letter or number once folded")
+
+    def test_digit_seven_passes(self):  # Nd; the string "7", not the number
+        p = run([self.read(witness="7")])
+        self.assertIn("witness '7' is distinct as spelled", p.stdout)
+        self.assertPasses(p)
+        self.assertPasses(run([self.read(witness="\u2166")]))  # ROMAN NUMERAL SEVEN, Nl
+
+    def test_letter_beside_a_mark_or_symbol_passes(self):
+        for witness in ("e\u0301", "w\u20dd", "w\u2605", "\U0001f600w"):
+            with self.subTest(witness=witness):
+                self.assertPasses(run([self.read(witness=witness)]))
+
+    def test_ypogegrammeni_checked_before_casefold(self):  # Lume 2026-10-25
+        self.assertEqual(unicodedata.category("\u0345"), "Mn")
+        self.assertEqual("\u0345".casefold(), "\u03b9")  # iota, Ll: would pass after casefold
+        self.assertNoOne("witness", "\u0345", "\u0345")
+        self.assertPasses(run([self.read(witness="a\u0345")]))
+
+    @unittest.skipUnless(unicodedata.unidata_version == "15.1.0", "pin needs the reference Unicode 15.1.0")
+    def test_u0890_alone_errors_on_the_reference_interpreter(self):
+        self.assertEqual(unicodedata.category("\u0890"), "Cf")
+        self.assertNoOne("witness", "\u0890", "\u0890")
+
+    def test_subject_vs_authorizer_stays_raw(self):
+        # Fold toward a mark, never away from one (Kama 2026-10-23): "A" and
+        # "a " are not the authorizer "a" for the does-it-need-a-witness test.
+        for subject in ("A", "a ", "a\u200b", "\uff41"):
+            with self.subTest(subject=subject):
+                p = run([self.read(subject=subject, authorizer="a")])
+                self.assertIn("[UNWITNESSED] r-1: read has no witness (§11.3)", p.stdout)
+        p = run([self.read(subject="a", authorizer="a")])
+        self.assertNotIn("UNWITNESSED", p.stdout)
+
+    def test_fold_functions(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        sys.dont_write_bytecode, was = True, sys.dont_write_bytecode
+        try:
+            import check
+        finally:
+            sys.path.pop(0)
+            sys.dont_write_bytecode = was
+        self.assertEqual(check.shown_party(" A \u2800\u3000 B\u200b "), "A B")
+        self.assertEqual(check.fold_party(" A \u2800\u3000 B\u200b "), "a b")
+        self.assertEqual(check.shown_party("\u0345"), "\u0345")
+        self.assertEqual(check.fold_party("a\u0345"), "a\u03b9")
+        self.assertEqual(check.UNICODE_VERSION, "15.1.0")
+        for value in ("a  b", "\u2800a", "\u0390\u0345", "\ufb01 \u1e9e", "e\u034f\u0301 \u00a0"):
+            for f in (check.shown_party, check.fold_party):
+                once = f(value)
+                self.assertEqual(f(once), once, (f.__name__, value))
+
+
+class UnicodePinned(unittest.TestCase):
+    """Kama #forge 2026-10-26/27, Lume #forge 2026-10-26: SPEC names Unicode
+    15.1.0; a run whose unicodedata.unidata_version differs (exact, not at
+    least) exits non-zero with UNPINNED, naming the version, before any
+    party is read. U+0890 is Cf from 14.0 and Cn in 13.0."""
+
+    PATCH = ("import runpy, sys, unicodedata; unicodedata.unidata_version = sys.argv[1]; "
+             "sys.argv = sys.argv[2:]; runpy.run_path(sys.argv[0], run_name='__main__')")
+
+    def run_as(self, version, receipts):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "raw.txt").write_bytes(RAW)
+            sidecar = Path(d) / "report.md.receipts.jsonl"
+            if isinstance(receipts, bytes):
+                sidecar.write_bytes(receipts)
+            else:
+                sidecar.write_text("".join(json.dumps(r) + "\n" for r in receipts))
+            return subprocess.run([sys.executable, "-c", self.PATCH, version, str(CHECK), str(sidecar),
+                                   "--today", "2026-09-27"], capture_output=True, text=True)
+
+    def test_other_version_is_unpinned_before_any_party(self):
+        w0890 = Gap9DerivedMarks.read(self, witness="\u0890")
+        for version in ("13.0.0", "14.0.0", "15.0.0", "15.1.1", "16.0.0"):  # exact, not at least
+            with self.subTest(version=version):
+                p = self.run_as(version, [w0890])
+                self.assertIn(f"[UNPINNED] this interpreter's Unicode data is {version}; "
+                              "SPEC §11.3 names 15.1.0 (exact match); no party read", p.stdout)
+                self.assertIn("check: UNPINNED", p.stdout)
+                self.assertIn(f"error: UNPINNED: this interpreter's Unicode data is {version}", p.stderr)
+                self.assertNotIn("error: receipt", p.stderr)  # no party read
+                self.assertNotIn("r-1", p.stdout)
+                self.assertNotIn("Traceback", p.stderr)
+                self.assertNotEqual(p.returncode, 0)
+
+    def test_unpinned_before_the_sidecar_is_read(self):
+        p = self.run_as("13.0.0", b"\xff not json\n")
+        self.assertIn("check: UNPINNED", p.stdout)
+        self.assertNotIn("line 1", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_unpinned_even_when_every_receipt_is_ok(self):
+        p = self.run_as("16.0.0", [receipt("r-1", sha256=sha(RAW))])
+        self.assertIn("check: UNPINNED", p.stdout)
+        self.assertNotIn("[  OK   ]", p.stdout)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_the_pinned_version_reads(self):
+        p = self.run_as("15.1.0", [receipt("r-1", sha256=sha(RAW))])
+        self.assertNotIn("UNPINNED", p.stdout)
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_coverage_does_not_ask(self):  # @grok draft: coverage reads no party
+        with tempfile.TemporaryDirectory() as d:
+            p = subprocess.run([sys.executable, "-c", self.PATCH, "13.0.0", str(CHECK), "--coverage",
+                                str(ROOT / "SPEC.md"), str(ROOT / "DECISIONS.md")],
+                               capture_output=True, text=True, cwd=d)
+        self.assertNotIn("Unicode data", p.stdout + p.stderr)
+        self.assertIn("coverage: UNPINNED", p.stdout)  # the §0 pin, asked for its own reason
 
 
 class RegistryBoundWitness(unittest.TestCase):
