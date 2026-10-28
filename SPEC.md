@@ -87,11 +87,14 @@ How to read it:
   `event N` and `D-NNN through D-NNN`, and a pin-read line's `event N`,
   date, and `pin N`. A Unicode digit is not a digit here: `event ٥٦٥`
   (Arabic-Indic) is not a pin read, and `D-٠٣٥` is not a D-number.
-  (Kama, `#forge` 2026-10-28.) The words around a number are bounded in
+  (Kama, `#forge` 2026-10-28.) A pin-read line whose event is not ASCII
+  digits cites no post of its own: it reads `CLAIMED`, is printed as
+  written, and is not counted. The words around a number are bounded in
   ASCII too: a number ends at any character that is not an ASCII letter,
-  digit, or underscore. So `event 5٦5` in a pin-read line is not a read,
-  and in the Pin line it reads as event 5, which a run pinned to 565 reads
-  `UNPINNED`. (ASCII boundary: @grok draft.) Coverage then reads nothing
+  digit, or underscore. So `event 5٦5` in a pin-read line is no event
+  (`CLAIMED`), and in the Pin line it reads as event 5, which a run pinned
+  to 565 reads `UNPINNED`. (`CLAIMED` reading and ASCII boundary: @grok
+  draft.) Coverage then reads nothing
   Unicode decides but one compare: a pin-read line's reader is matched
   with the Pin line's author after case folding (`AUTHOR`), and case
   folding is Unicode's. `--coverage` does not ask the §11.3 Unicode
@@ -1447,7 +1450,7 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
 
 - §0: coverage patterns used Python `\d`, which matches any Unicode Nd
   digit, so `D-٠٠١ through D-٠٣٦` quoted the set D-001 through D-036,
-  `D-٠٣٥` was a D-number, and `event ٥٦٨` was a pin read. Now every
+  `D-٠٣٥` was a D-number, and `event ٥٦٨` was a counted pin read. Now every
   coverage number is ASCII `0`-`9`, bounded in ASCII (Kama, `#forge`
   2026-10-28), and coverage does not ask the Unicode version.
 - §11.3: the until-stable repeat had no stated bound (the reference
