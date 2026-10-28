@@ -1825,5 +1825,183 @@ class NotChecked(unittest.TestCase):
         self.assertIn("NOT CHECKED: authorship of 7 (Pulse not readable)", p.stdout)
 
 
+def import_check():
+    """tools/check.py as a module, without writing tools/__pycache__."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    sys.dont_write_bytecode, was = True, sys.dont_write_bytecode
+    try:
+        import check
+    finally:
+        sys.path.pop(0)
+        sys.dont_write_bytecode = was
+    return check
+
+
+class CoverageAsciiDigits(unittest.TestCase):
+    """Kama #forge 2026-10-28: coverage patterns used \d, which matches any
+    Unicode Nd digit. Every coverage number is ASCII 0-9 now: "event
+    \u0665\u0666\u0665" (Arabic-Indic 565) is not a pin read, and
+    "D-\u0660\u0663\u0665" is not a D-number. A pin-read line whose event
+    is not ASCII cites no event of its own, so it reads CLAIMED, not
+    counted, and is printed as written. Bounded in ASCII (@grok draft)."""
+
+    cover = PinReads.cover
+    AR_565, AR_035 = "\u0665\u0666\u0665", "\u0660\u0663\u0665"
+
+    def test_kama_pins_at_the_pattern(self):
+        check = import_check()
+        line = "- Kama, event {}, 2026-10-06: pin 565 read against `695b2ce`."
+        self.assertIsNotNone(check.READ_LINE.match(line.format("569")))
+        for ev in (self.AR_565, "5\u06665", "\u0665\u06665"):  # Arabic-Indic, mixed
+            with self.subTest(ev=ev):
+                m = check.READ_LINE.match(line.format(ev))
+                self.assertIsNone(m.group(2))  # no event of its own: a CLAIMED line
+                self.assertEqual(m.group(1), f"Kama, event {ev}")
+                self.assertEqual(check.read_kind(m.groups(), "565", None), check.CLAIMED)
+        self.assertIsNone(check.READ_LINE.match(line.format("569").replace("pin 565", "pin " + self.AR_565)))
+        self.assertIsNone(check.READ_LINE.match(line.format("569").replace("2026", "\u0662\u0660\u0662\u0666")))
+        self.assertEqual(check.D_NUM.findall("D-035"), ["D-035"])
+        for d in ("D-" + self.AR_035, "D-03\u0665", "D-\uff10\uff13\uff15", "D-\u0966\u0969\u096b"):
+            with self.subTest(d=d):
+                self.assertEqual(check.D_NUM.findall(d), [])
+                self.assertEqual(check.closed_decisions(f"## {d} · title\n\n- **Source:** x\n"), {})
+        # ASCII boundary (@grok draft): a non-ASCII character ends a number.
+        self.assertEqual(check.D_NUM.findall("D-035\u2013D-036"), ["D-035", "D-036"])
+        self.assertEqual(check.D_NUM.findall("D-035\u0665"), ["D-035"])
+        self.assertEqual(check.D_NUM.findall("D-0355 xD-035"), [])
+        self.assertIsNone(check.spec_pin(f"- **Pin.** event {self.AR_565}: closed set D-001 through D-002.\n"))
+        self.assertIsNone(check.spec_pin("- **Pin.** event 565: closed set D-\u0660\u0660\u0661 through D-002.\n"))
+        self.assertEqual(check.spec_pin("- **Pin.** event 565: closed set D-001 through D-002.\n"),
+                         ("565", {"D-001", "D-002"}))
+        self.assertIsNone(check.PIN_AUTHOR.search(f"event {self.AR_565} (Lume, 2026-10-05)"))
+
+    def assertClaimedNotCounted(self, p, ev):
+        self.assertIn("pin reads naming event 7: 0 counted; 0 AUTHOR, 1 CLAIMED", p.stdout)
+        self.assertIn(f"pin read @a, event {ev} (no own post, 2026-08-11) [CLAIMED, not counted]", p.stdout)
+        self.assertIn("[UNWITNESSED] pin quote: no counted SPEC §0 pin-read line names event 7", p.stdout)
+        self.assertIn("NOT CHECKED: authorship of 7 (Pulse", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_arabic_indic_event_is_not_a_pin_read(self):
+        self.assertClaimedNotCounted(
+            self.cover(spec=SPEC.replace(READ, READ.replace("event 8", f"event {self.AR_565}"))), self.AR_565)
+        p = self.cover(spec=SPEC.replace(READ, READ.replace("pin 7", "pin \u0667")))
+        self.assertIn("[UNWITNESSED] pin quote: no SPEC §0 pin-read line names event 7", p.stdout)
+
+    def test_mixed_digits_event_is_not_a_pin_read(self):
+        for ev in ("8\u06668", "5\u06665"):
+            with self.subTest(ev=ev):
+                self.assertClaimedNotCounted(
+                    self.cover(spec=SPEC.replace(READ, READ.replace("event 8", f"event {ev}"))), ev)
+
+    def test_pin_line_reads_ascii_digits_only(self):
+        p = self.cover(spec=SPEC.replace("event 7:", "event \u0667:"))
+        self.assertIn("[UNPINNED] SPEC §0 cites no pin", p.stdout)
+        # Mixed: the number ends at the first non-ASCII character (@grok draft),
+        # so the Pin line cites event 7 and a run pinned to 7\u06667 isn't asked.
+        p = self.cover(spec=SPEC.replace("event 7:", "event 7\u06667:"))
+        self.assertIn("coverage: ", p.stdout)
+        p = self.cover(spec=SPEC.replace("event 7:", "event 5\u06665:"))
+        self.assertIn("[UNPINNED] SPEC §0 cites pin event 5, run pinned to event 7", p.stdout)
+        self.assertEqual(p.returncode, 1)
+        p = self.cover(spec=SPEC.replace("D-001 through D-002", "D-\u0660\u0660\u0661 through D-002"))
+        self.assertIn("[UNPINNED] SPEC §0 cites no pin", p.stdout)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed: the fixture's pin read can't be compared, so it isn't counted")
+    def test_arabic_indic_d_number_is_not_cited(self):
+        p = self.cover(spec=SPEC.replace("(D-002 b)", f"(D-002 b; D-{self.AR_035})"))
+        self.assertNotIn("NOT CLOSED", p.stdout)
+        self.assertIn("coverage: 0 gap(s)", p.stdout)
+        self.assertEqual(p.returncode, 0)
+        # and it doesn't stand in for an ASCII one
+        p = self.cover(spec=SPEC.replace("(D-002 b)", "(D-\u0660\u0660\u0662 b)"))
+        self.assertIn("[MISSING] D-002", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_open_questions_heading_needs_ascii_digits(self):
+        p = self.cover(spec=SPEC.replace("## 12. Open questions", "## \u0661\u0662. Open questions"))
+        self.assertIn("no '## N. Open questions' heading", p.stderr)
+        self.assertNotEqual(p.returncode, 0)
+
+    def test_no_unicode_digit_class_left_in_coverage(self):
+        src = CHECK.read_text(encoding="utf-8")
+        code = "\n".join(l.split("#")[0] for l in src.splitlines())
+        self.assertNotIn("\\d", code)
+        self.assertNotIn("\\w", code)
+
+
+class FoldPasses(unittest.TestCase):
+    """Lume #forge 2026-10-27: the fold repeat is bounded. At 15.1 every
+    single code point settles after one changing pass and the second only
+    confirms; a third pass that still changes the value is an error naming
+    line and field, verdict UNSTABLE, not a hang. Both folds (as shown, and
+    the casefolded compare form) are run when the line is read (@grok draft)."""
+
+    @unittest.skipUnless(unicodedata.unidata_version == "15.1.0", "pin needs the reference Unicode 15.1.0")
+    def test_lume_no_assigned_code_point_needs_a_third_pass(self):
+        # Every assigned code point (general category not Cn, 289,394 at
+        # 15.1, Co and Cs included), alone: no sampling. About 3 s.
+        check = import_check()
+        step, n = check._party_fold_once, 0
+        for cp in range(0x110000):
+            ch = chr(cp)
+            if unicodedata.category(ch) == "Cn":
+                continue
+            n += 1
+            shown = step(ch)
+            if step(shown) != shown:
+                self.fail(f"U+{cp:04X}: second party-fold pass changed {shown!r}")
+            folded = step(shown.casefold())
+            if step(folded.casefold()) != folded:
+                self.fail(f"U+{cp:04X}: second compare-fold pass changed {folded!r}")
+            self.assertEqual(check.shown_party(ch), shown)  # raises Unstable if not
+            self.assertEqual(check.fold_party(ch), folded)
+        self.assertEqual(n, 289394)
+
+    def test_third_changing_pass_is_unstable(self):
+        check = import_check()
+        real = check._party_fold_once
+        try:
+            check._party_fold_once = lambda v: v[1:] if v.startswith("#") else v
+            self.assertEqual(check.shown_party("#a"), "a")    # one change, then confirms
+            self.assertEqual(check.shown_party("##a"), "a")   # two changes, the third confirms
+            with self.assertRaises(check.Unstable) as e:
+                check.shown_party("###a")                     # a third pass still changes it
+            self.assertEqual(str(e.exception), "'###a' -> '##a' -> '#a' -> 'a'")
+            r = Gap9DerivedMarks.read(self, witness="###w")
+            with self.assertRaises(SystemExit) as e:
+                check.check_field_types(r, 3)
+            self.assertEqual(str(e.exception.code),
+                             "error: receipt on line 3 field 'witness' is UNSTABLE: a third party fold "
+                             "pass still changes it ('###w' -> '##w' -> '#w' -> 'w'); the fold stops "
+                             "at 3 passes (§11.3)")
+            # the compare form: stable as shown, never stable once casefolded
+            check._party_fold_once = lambda v: v + "!" if v.startswith("q") else v
+            r = Gap9DerivedMarks.read(self, reader="Q")
+            with self.assertRaises(SystemExit) as e:
+                check.check_field_types(r, 2)
+            self.assertIn("error: receipt on line 2 field 'reader' is UNSTABLE: a third compare fold "
+                          "(casefold) pass still changes it", str(e.exception.code))
+        finally:
+            check._party_fold_once = real
+
+    def test_unstable_end_to_end_exits_non_zero_naming_line_and_field(self):
+        patch = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]); "
+                 "import check; check._party_fold_once = lambda v: v + '!'; "
+                 "sys.argv = sys.argv[2:]; check.main()")
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "raw.txt").write_bytes(RAW)
+            sidecar = Path(d) / "report.md.receipts.jsonl"
+            rs = [receipt("r-0", sha256=sha(RAW)), Gap9DerivedMarks.read(self, witness="w")]
+            sidecar.write_text("".join(json.dumps(r) + "\n" for r in rs))
+            p = subprocess.run([sys.executable, "-c", patch, str(ROOT / "tools"), str(CHECK),
+                                str(sidecar), "--today", "2026-09-27"], capture_output=True, text=True)
+        self.assertIn("error: receipt on line 2 field 'subject' is UNSTABLE: a third party fold pass "
+                      "still changes it ('s' -> 's!' -> 's!!' -> 's!!!')", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertNotIn("[", p.stdout)  # no verdict printed for a file that didn't load
+        self.assertNotEqual(p.returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -82,6 +82,9 @@
 #          NFKC, blank list U+2800 to a space, fold_ws last) and the party
 #          as shown needs one L or N character, checked before casefold
 #          (Kama #forge 2026-10-23/24/25/26; Lume #forge 2026-10-23/24/25).
+#          Each fold stops at three passes: a third pass that still changes
+#          the value is an error naming line and field, UNSTABLE (Lume
+#          #forge 2026-10-27); both folds run when the line is read.
 #          subject vs authorizer stays raw. Unicode data must be 15.1.0
 #          exactly, else the run exits UNPINNED before the sidecar is read
 #          (Kama #forge 2026-10-26/27; Lume #forge 2026-10-26).
@@ -114,7 +117,11 @@
 # "Open questions" section) or listed under "### Dropped"; every D-number
 # cited there or dropped must be closed; none may be both. Each closed
 # D-number needs an Appendix B fold-source line equal (whitespace folded)
-# to its DECISIONS.md **Source:** line. Exit 0 iff no gap.
+# to its DECISIONS.md **Source:** line. Exit 0 iff no gap. Every number
+# coverage reads is ASCII 0-9, bounded in ASCII (re.ASCII; Kama #forge
+# 2026-10-28): "D-" plus Arabic-Indic digits is not a D-number. So coverage
+# does not ask the Unicode version; its one Unicode read is the AUTHOR name
+# casefold (SPEC §0, open).
 #
 # Pin (--pin ID; SPEC §0 "Pin"; Lume and Kama #forge cuts, 2026-10-05):
 # the closed set is the one the pin post lists, and the pin id is an input
@@ -382,13 +389,25 @@ def _party_fold_once(value):
     return fold_ws("".join(" " if ch in BLANK else ch for ch in value))
 
 
+FOLD_PASSES = 3  # §11.3 Fold passes (Lume #forge 2026-10-27)
+
+
+class Unstable(Exception):
+    """§11.3: a third fold pass still changed the value (verdict UNSTABLE)."""
+
+
 def _until_stable(step, value):
-    for _ in range(8):  # one pass is stable for every code point tested; bound the rest
-        folded = step(value)
-        if folded == value:
-            break
-        value = folded
-    return value
+    """step repeated until the value stops changing, three passes at most.
+    At 15.1 every single code point settles after one changing pass and the
+    second only confirms (Lume #forge 2026-10-27); a third pass that still
+    changes the value is UNSTABLE, not a hang and not a silent stop."""
+    seen = [value]
+    for _ in range(FOLD_PASSES):
+        folded = step(seen[-1])
+        if folded == seen[-1]:
+            return folded
+        seen.append(folded)
+    raise Unstable(" -> ".join(repr(v) for v in seen))
 
 
 def shown_party(value):
@@ -411,10 +430,11 @@ def fold_party(value):
     return _until_stable(lambda v: _party_fold_once(v.casefold()), shown_party(value))
 
 
-def names_someone(value):
+def names_someone(value, shown=None):
     """§11.3: the party as shown holds one L or N character (Lume #forge
     2026-10-24; Kama #forge 2026-10-25, replacing outside-Cc/Cf/Z)."""
-    return any(unicodedata.category(ch)[0] in "LN" for ch in shown_party(value))
+    shown = shown_party(value) if shown is None else shown
+    return any(unicodedata.category(ch)[0] in "LN" for ch in shown)
 
 
 def unicode_pin_gap():
@@ -473,9 +493,21 @@ def check_field_types(r, n):
         if all(ch in WHITE_SPACE for ch in value):
             sys.exit(f"error: receipt on line {n} field '{field}' is only whitespace ({value!r})")
         refuse_control(value, n, field)
-        if not names_someone(value):
+        # Lume #forge 2026-10-27: both folds stop at three passes; a third
+        # that still changes the value is UNSTABLE. Both are folded here,
+        # where the line is known, even if no compare runs (@grok draft).
+        stage = "party fold"
+        try:
+            shown = shown_party(value)
+            stage = "compare fold (casefold)"
+            fold_party(value)
+        except Unstable as e:
+            sys.exit(f"error: receipt on line {n} field '{field}' is UNSTABLE: a third "
+                     f"{stage} pass still changes it ({e}); the fold stops at "
+                     f"{FOLD_PASSES} passes (§11.3)")
+        if not names_someone(value, shown):
             sys.exit(f"error: receipt on line {n} field '{field}' has no letter or number once "
-                     f"folded ({value!r} shows as {shown_party(value)!r}); it names no one a "
+                     f"folded ({value!r} shows as {shown!r}); it names no one a "
                      "reader can see")
     if not ymd_ok(r["date"]):
         shown = repr(r["date"]) if isinstance(r["date"], str) else json_type(r["date"])
@@ -809,17 +841,24 @@ def derived_marks(r, today, superseded, base: Path):
     return marks, notes
 
 
-D_NUM = re.compile(r"\bD-\d{3}\b")
+# Coverage reads ASCII digits only (SPEC §0; Kama #forge 2026-10-28): Python's
+# \d matches any Unicode Nd digit, so "D-\u0660\u0663\u0665" was a D-number
+# and "event \u0665\u0666\u0665" a pin read. Every coverage pattern is [0-9]
+# under re.ASCII, so \b is ASCII too (@grok draft): coverage reads nothing
+# Unicode decides but the AUTHOR name casefold in read_kind (SPEC §0), and
+# does not ask the §11.3 Unicode version.
+A = re.ASCII
+D_NUM = re.compile(r"\bD-[0-9]{3}\b", A)
 
 
 def closed_decisions(text):
     """Closed D-numbers and their **Source:** lines (whitespace folded)."""
     closed = {}
     for sec in re.split(r"(?m)^## ", text):
-        m = re.match(r"(D-\d{3}) ·", sec)
+        m = re.match(r"(D-[0-9]{3}) ·", sec, A)
         if not m:
             continue
-        src = re.search(r"^- \*\*Source:\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", sec, re.S | re.M)
+        src = re.search(r"^- \*\*Source:\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", sec, re.S | re.M | A)
         closed[m.group(1)] = fold_ws(src.group(1)) if src else None
     return closed
 
@@ -829,7 +868,7 @@ def spec_folds(text):
     lines = text.splitlines()
     try:
         start = next(i for i, l in enumerate(lines) if l.startswith("## 1. "))
-        end = next(i for i, l in enumerate(lines) if re.match(r"## \d+\. Open questions", l))
+        end = next(i for i, l in enumerate(lines) if re.match(r"## [0-9]+\. Open questions", l, A))
     except StopIteration:
         sys.exit("error: SPEC has no '## 1.' heading or no '## N. Open questions' heading")
     cited = {}
@@ -839,21 +878,21 @@ def spec_folds(text):
     dropped, sources, section = set(), {}, None
     for line in lines[end:]:
         if line.startswith("#"):
-            section = "dropped" if re.match(r"#+ Dropped\b", line) else (
-                "sources" if re.match(r"#+ Appendix B\b", line) else None)
+            section = "dropped" if re.match(r"#+ Dropped\b", line, A) else (
+                "sources" if re.match(r"#+ Appendix B\b", line, A) else None)
             continue
         if section == "dropped":
-            m = re.match(r"- \**(D-\d{3})\b", line)
+            m = re.match(r"- \**(D-[0-9]{3})\b", line, A)
             if m:
                 dropped.add(m.group(1))
         elif section == "sources":
-            m = re.match(r"- \*\*(D-\d{3})\*\* — (.*)$", line)
+            m = re.match(r"- \*\*(D-[0-9]{3})\*\* — (.*)$", line, A)
             if m:
                 sources[m.group(1)] = fold_ws(m.group(2))
     return cited, dropped, sources
 
 
-PIN_LINE = re.compile(r"\*\*Pin\.\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", re.S)
+PIN_LINE = re.compile(r"\*\*Pin\.\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", re.S | A)
 
 
 def spec_pin(text):
@@ -862,18 +901,18 @@ def spec_pin(text):
     if not m:
         return None
     body = fold_ws(m.group(1))
-    ev = re.search(r"\bevent (\d+)\b", body)
-    rng = re.search(r"\bD-(\d{3}) through D-(\d{3})\b", body)
+    ev = re.search(r"\bevent ([0-9]+)\b", body, A)
+    rng = re.search(r"\bD-([0-9]{3}) through D-([0-9]{3})\b", body, A)
     if not ev or not rng:
         return None
     lo, hi = int(rng.group(1)), int(rng.group(2))
     return ev.group(1), {f"D-{n:03d}" for n in range(lo, hi + 1)}
 
 
-PIN_READS = re.compile(r"\*\*Pin reads\.\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", re.S)
-READ_LINE = re.compile(r"^- (.+?),(?: event (\d+),)? (\d{4}-\d{2}-\d{2}): "
-                       r"pin (\d+) read against `([0-9a-f]{7,40})`(.*)$", re.S)
-PIN_AUTHOR = re.compile(r"\bevent \d+ \(([^,()]+),")
+PIN_READS = re.compile(r"\*\*Pin reads\.\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", re.S | A)
+READ_LINE = re.compile(r"^- (.+?),(?: event ([0-9]+),)? ([0-9]{4}-[0-9]{2}-[0-9]{2}): "
+                       r"pin ([0-9]+) read against `([0-9a-f]{7,40})`(.*)$", re.S | A)
+PIN_AUTHOR = re.compile(r"\bevent [0-9]+ \(([^,()]+),", A)
 AUTHOR, CLAIMED, COUNTED = "AUTHOR", "CLAIMED", "counted"
 NOT_COMPARED = "NOT COMPARED"
 
@@ -886,7 +925,7 @@ def spec_pin_reads(text):
         return []
     items = []
     for line in m.group(1).splitlines():
-        if re.match(WS_CLASS + r"+- ", line):
+        if re.match(WS_CLASS + r"+- ", line, A):
             items.append(strip_ws(line))
         elif items and strip_ws(line):
             items[-1] += " " + strip_ws(line)
@@ -903,8 +942,10 @@ def spec_pin_author(text):
 def read_kind(read, pin, author):
     """counted | AUTHOR | CLAIMED for one pin-read line (SPEC §0)."""
     who, ev, _, _, _, rest = read
+    # casefold is Unicode's: the one coverage read the version decides; it is
+    # not asked (SPEC §0, open).
     name = lambda w: strip_ws(w).lstrip("@").casefold()
-    if (re.search(r"\bAUTHOR\b", who + rest) or ev == pin
+    if (re.search(r"\bAUTHOR\b", who + rest, A) or ev == pin
             or (author and name(who) == name(author))):
         return AUTHOR
     if not ev:
@@ -937,7 +978,7 @@ def pin_read_gaps(spec_text, decisions: Path, pin, quoted):
         out.append(read[:-1] + (kind,))
         tag = "" if kind == COUNTED else f" [{kind}, not counted]"
         ev = f"event {ev}" if ev else "no own post"
-        who = re.sub(r"^AUTHOR:" + WS_CLASS + "*", "", who)
+        who = re.sub(r"^AUTHOR:" + WS_CLASS + "*", "", who, flags=A)
         if text is None:
             notes.append(f"pin read {who} ({ev}, {day}){tag} against {commit}: skipped, {why}")
             continue
