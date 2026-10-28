@@ -80,6 +80,23 @@ How to read it:
   - Lume, event 565, 2026-10-05: pin 565 read against `695b2ce`, 15:20
     UTC, 36 headings, D-001–D-036. AUTHOR: the pin author's own read,
     carried, not counted.
+- **Coverage reads ASCII digits.** Every number `--coverage` reads is
+  ASCII `0`-`9` only: the D-number `D-NNN` (cited in §1–§11, in the
+  Dropped list, in Appendix B, and in a `## D-0NN ·` heading in
+  DECISIONS.md), the `## N. Open questions` heading, the Pin line's
+  `event N` and `D-NNN through D-NNN`, and a pin-read line's `event N`,
+  date, and `pin N`. A Unicode digit is not a digit here: `event ٥٦٥`
+  (Arabic-Indic) is not a pin read, and `D-٠٣٥` is not a D-number.
+  (Kama, `#forge` 2026-10-28.) The words around a number are bounded in
+  ASCII too: a number ends at any character that is not an ASCII letter,
+  digit, or underscore. So `event 5٦5` in a pin-read line is not a read,
+  and in the Pin line it reads as event 5, which a run pinned to 565 reads
+  `UNPINNED`. (ASCII boundary: @grok draft.) Coverage then reads nothing
+  Unicode decides but one compare: a pin-read line's reader is matched
+  with the Pin line's author after case folding (`AUTHOR`), and case
+  folding is Unicode's. `--coverage` does not ask the §11.3 Unicode
+  version; whether that match should fold ASCII only is open (@grok
+  draft).
 - **Draft resolutions.** Sentences marked "(@grok draft)" are @grok's
   proposed reading of a gap that showed up when the reference checker was
   written against this draft. They cite no D-number, because DECISIONS.md
@@ -856,6 +873,16 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   above run first. Whether a read needs a witness (`subject` not
   `authorizer`) stays a raw compare: fold toward a mark, never away from
   one (Kama, `#forge` 2026-10-23).
+- **Fold passes.** The party fold, and the case-folded compare fold
+  below, repeat until the value stops changing, and stop at three
+  passes: a third pass that still changes the value is an error naming
+  the line and the field, verdict `UNSTABLE`, not a hang and not a pass.
+  At 15.1 every single code point settles after one changing pass, and
+  the second pass only confirms. (Lume, `#forge` 2026-10-27.) The
+  reference checker folds each of the four, when present, both ways when
+  it reads the line, so an unstable compare form is reported with its line
+  and field even where no compare runs (@grok draft). Blank to a space,
+  after NFKC and before `fold_ws`, holds (Lume, `#forge` 2026-10-27).
 - **Blank list.** Characters that render blank but are neither
   `White_Space` nor `Default_Ignorable_Code_Point`. The list is this
   spec's own, and growing it is a spec change: U+2800 BRAILLE PATTERN
@@ -868,8 +895,10 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   and Cn in 13.0: at 15.1 a `witness` of U+0890 alone is an error;
   elsewhere the run is `UNPINNED`. (Kama, `#forge` 2026-10-26 /
   2026-10-27; Lume, `#forge` 2026-10-26.) The reference checker asks
-  before it opens the sidecar, and `--coverage` reads no party and does
-  not ask (@grok draft).
+  before it opens the sidecar. `--coverage` reads no party and its
+  numbers are ASCII digits only (§0; Kama, `#forge` 2026-10-28), so it
+  does not ask; its one Unicode read, the `AUTHOR` name case fold, is
+  noted in §0 (@grok draft).
 - **Registry-bound witness.** A party identifier used as `witness` MUST
   resolve in a registry of party identifiers that was fixed before the run
   by a third party who is neither the authorizer nor the witness. Trust is
@@ -909,7 +938,8 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
 - **Folded compare (no registry).** With no registry bound, "equal" above
   is equal after a fold: the party as shown, case-folded (Unicode full
   case folding), then steps (1)–(5) of the party fold again, repeated
-  until the string stops changing. So
+  until the string stops changing, three passes at most (Fold passes,
+  above). So
   `authorizer` `"a"` and `witness` `"a"` plus U+200B, `"a"` plus U+FEFF,
   `"A"`, or fullwidth U+FF41 are one party, and so are `authorizer` `é`
   (U+00E9) and `witness` `e` plus U+0301. (Kama, `#forge` 2026-10-22.)
@@ -1412,6 +1442,18 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
 - §11.3: Unicode 15.1.0 is named; another `unidata_version` exits
   `UNPINNED` before any party is read (Kama, `#forge` 2026-10-26 /
   2026-10-27; Lume, `#forge` 2026-10-26).
+
+**v0.2-draft, coverage digits are ASCII; the fold stops at three passes**
+
+- §0: coverage patterns used Python `\d`, which matches any Unicode Nd
+  digit, so `D-٠٠١ through D-٠٣٦` quoted the set D-001 through D-036,
+  `D-٠٣٥` was a D-number, and `event ٥٦٨` was a pin read. Now every
+  coverage number is ASCII `0`-`9`, bounded in ASCII (Kama, `#forge`
+  2026-10-28), and coverage does not ask the Unicode version.
+- §11.3: the until-stable repeat had no stated bound (the reference
+  stopped silently after 8 passes). Now a third pass that still changes a
+  party is an error naming line and field, `UNSTABLE` (Lume, `#forge`
+  2026-10-27).
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
