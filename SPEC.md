@@ -89,17 +89,29 @@ How to read it:
   (Arabic-Indic) is not a pin read, and `D-٠٣٥` is not a D-number.
   (Kama, `#forge` 2026-10-28.) A pin-read line whose event is not ASCII
   digits cites no post of its own: it reads `CLAIMED`, is printed as
-  written, and is not counted. The words around a number are bounded in
-  ASCII too: a number ends at any character that is not an ASCII letter,
-  digit, or underscore. So `event 5٦5` in a pin-read line is no event
-  (`CLAIMED`), and in the Pin line it reads as event 5, which a run pinned
-  to 565 reads `UNPINNED`. (`CLAIMED` reading and ASCII boundary: @grok
-  draft.) Coverage then reads nothing
-  Unicode decides but one compare: a pin-read line's reader is matched
-  with the Pin line's author after case folding (`AUTHOR`), and case
-  folding is Unicode's. `--coverage` does not ask the §11.3 Unicode
-  version; whether that match should fold ASCII only is open (@grok
-  draft).
+  written, and is not counted. (`CLAIMED` reading: @grok draft.) An
+  event number ends at an ASCII boundary: the digit run starts after
+  `event ` and ends at the end of the line or at a space, tab, `.`, `,`,
+  `;`, `:`, `)` or `]`. So `event 565`, `event 565.` and `event 565)` read
+  565, and `event 5٦5`, `event 56٥`, `event ٥٦٥` and `event 565x` read
+  no event: in a pin-read line that line cites no post of its own
+  (`CLAIMED`, not counted), and in the Pin line no pin is cited, which
+  reads `UNPINNED`. A digit run cut short by any non-ASCII character
+  never yields a shorter number: a checker that reports a number nobody
+  wrote is worse than one that reads none. (Lume, `#forge` 2026-10-28;
+  this replaces the @grok draft that read `event 5٦5` in the Pin line as
+  event 5.) Other coverage numbers end at any character that is not an
+  ASCII letter, digit, or underscore (@grok draft). Coverage then reads
+  nothing Unicode decides but one compare: a pin-read line's reader is
+  matched with the Pin line's author after case folding (`AUTHOR`), and
+  case folding is Unicode's. `--coverage` does not ask the §11.3 Unicode
+  version.
+- **Open call: `AUTHOR` case fold.** Whether the `AUTHOR` match folds
+  ASCII only, or Unicode as now, is open. Lume leans ASCII-only and wants
+  it kept in step with the claimant fold in the pin-read kind (`CLAIMED`
+  / `AUTHOR` / counted), which is Kama's call 5; so it waits on Kama.
+  Until then the reference checker keeps Python's `casefold`. (Lume,
+  `#forge` 2026-10-28. Open, not folded.)
 - **Draft resolutions.** Sentences marked "(@grok draft)" are @grok's
   proposed reading of a gap that showed up when the reference checker was
   written against this draft. They cite no D-number, because DECISIONS.md
@@ -1457,6 +1469,16 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   stopped silently after 8 passes). Now a third pass that still changes a
   party is an error naming line and field, `UNSTABLE` (Lume, `#forge`
   2026-10-27).
+
+**v0.2-draft, an event number ends at an ASCII boundary**
+
+- §0: `event 5٦5` in the Pin line read as event 5, a number nobody wrote.
+  Now an event number must end at the end of the line or at a space, tab,
+  `.`, `,`, `;`, `:`, `)` or `]`; a digit run cut by a non-ASCII character
+  or followed by a letter (`565x`) reads no event, `CLAIMED` in a pin-read
+  line, no pin cited in the Pin line (Lume, `#forge` 2026-10-28).
+- §0: the `AUTHOR` case fold is marked as an open call, waiting on Kama's
+  call 5 (Lume, `#forge` 2026-10-28).
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
