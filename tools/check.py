@@ -893,6 +893,13 @@ def spec_folds(text):
 
 
 PIN_LINE = re.compile(r"\*\*Pin\.\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", re.S | A)
+# An event number ends at an ASCII boundary (SPEC §0; Lume #forge 2026-10-28):
+# end of line, space, tab, . , ; : ) or ]. Not \b: "event 5\u06665" read as
+# event 5, a number nobody wrote. A digit run cut short by any non-ASCII
+# character (or followed by a letter, "565x") reads no event, never a shorter
+# number. Not (?!\d) either: \d is Unicode and moves with the version.
+EVENT_END = r"(?=$|[ \t.,;:)\]])"
+PIN_EVENT = re.compile(r"\bevent ([0-9]+)" + EVENT_END, A)
 
 
 def spec_pin(text):
@@ -901,7 +908,7 @@ def spec_pin(text):
     if not m:
         return None
     body = fold_ws(m.group(1))
-    ev = re.search(r"\bevent ([0-9]+)\b", body, A)
+    ev = PIN_EVENT.search(body)
     rng = re.search(r"\bD-([0-9]{3}) through D-([0-9]{3})\b", body, A)
     if not ev or not rng:
         return None
@@ -910,6 +917,8 @@ def spec_pin(text):
 
 
 PIN_READS = re.compile(r"\*\*Pin reads\.\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", re.S | A)
+# A pin-read line's event ends at its "," (an ASCII boundary): "event 5\u06665,"
+# and "event 565x," cite no post of their own, so the line reads CLAIMED.
 READ_LINE = re.compile(r"^- (.+?),(?: event ([0-9]+),)? ([0-9]{4}-[0-9]{2}-[0-9]{2}): "
                        r"pin ([0-9]+) read against `([0-9a-f]{7,40})`(.*)$", re.S | A)
 PIN_AUTHOR = re.compile(r"\bevent [0-9]+ \(([^,()]+),", A)

@@ -1838,7 +1838,7 @@ def import_check():
 
 
 class CoverageAsciiDigits(unittest.TestCase):
-    """Kama #forge 2026-10-28: coverage patterns used \d, which matches any
+    r"""Kama #forge 2026-10-28: coverage patterns used \d, which matches any
     Unicode Nd digit. Every coverage number is ASCII 0-9 now: "event
     \u0665\u0666\u0665" (Arabic-Indic 565) is not a pin read, and
     "D-\u0660\u0663\u0665" is not a D-number. A pin-read line whose event
@@ -1897,13 +1897,14 @@ class CoverageAsciiDigits(unittest.TestCase):
     def test_pin_line_reads_ascii_digits_only(self):
         p = self.cover(spec=SPEC.replace("event 7:", "event \u0667:"))
         self.assertIn("[UNPINNED] SPEC §0 cites no pin", p.stdout)
-        # Mixed: the number ends at the first non-ASCII character (@grok draft),
-        # so the Pin line cites event 7 and a run pinned to 7\u06667 isn't asked.
-        p = self.cover(spec=SPEC.replace("event 7:", "event 7\u06667:"))
-        self.assertIn("coverage: ", p.stdout)
-        p = self.cover(spec=SPEC.replace("event 7:", "event 5\u06665:"))
-        self.assertIn("[UNPINNED] SPEC §0 cites pin event 5, run pinned to event 7", p.stdout)
-        self.assertEqual(p.returncode, 1)
+        # Mixed: an event number ends at an ASCII boundary (Lume #forge
+        # 2026-10-28), so "event 7\u06667" is no pin cited, never event 7.
+        for ev in ("7\u06667", "5\u06665"):
+            with self.subTest(ev=ev):
+                p = self.cover(spec=SPEC.replace("event 7:", f"event {ev}:"))
+                self.assertIn("[UNPINNED] SPEC §0 cites no pin", p.stdout)
+                self.assertNotIn("cites pin event", p.stdout)
+                self.assertEqual(p.returncode, 1)
         p = self.cover(spec=SPEC.replace("D-001 through D-002", "D-\u0660\u0660\u0661 through D-002"))
         self.assertIn("[UNPINNED] SPEC §0 cites no pin", p.stdout)
 
@@ -2001,6 +2002,70 @@ class FoldPasses(unittest.TestCase):
         self.assertNotIn("Traceback", p.stderr)
         self.assertNotIn("[", p.stdout)  # no verdict printed for a file that didn't load
         self.assertNotEqual(p.returncode, 0)
+
+class EventEndsAtAsciiBoundary(unittest.TestCase):
+    """Lume #forge 2026-10-28: an event number ends at an ASCII boundary
+    (end of line, space, tab, . , ; : ) ]). "event 565", "565." and "565)"
+    read 565; "5\u06665", "56\u0665", "\u0665\u0666\u0665" and "565x" read
+    nothing: CLAIMED in a pin-read line, no pin in the Pin line. A digit run
+    cut short by a non-ASCII character never yields a shorter number."""
+
+    cover = PinReads.cover
+    READS = ("565", "565.", "565)", "565,", "565;", "565:", "565]", "565 (Lume,", "565\tx")
+    NOTHING = ("5\u06665", "56\u0665", "\u0665\u0666\u0665", "565x", "565\u0665",
+               "565\u00e9", "565_", "565\u00a0", "565\u2013")
+
+    def test_pin_event_pattern(self):
+        check = import_check()
+        self.assertEqual(check.PIN_EVENT.search("event 565").group(1), "565")
+        for tail in self.READS:
+            with self.subTest(tail=tail):
+                self.assertEqual(check.PIN_EVENT.search(f"event {tail} x").group(1), "565")
+        for tail in self.NOTHING:
+            with self.subTest(tail=tail):
+                self.assertIsNone(check.PIN_EVENT.search(f"event {tail}"))
+                self.assertIsNone(check.PIN_EVENT.search(f"event {tail} x"))
+
+    def test_pin_line_never_reads_a_shorter_number(self):
+        check = import_check()
+        for tail in ("565", "565.", "565)"):
+            with self.subTest(tail=tail):
+                self.assertEqual(check.spec_pin(f"- **Pin.** event {tail} closed set D-001 through D-002.\n"),
+                                 ("565", {"D-001", "D-002"}))
+        # The Pin line is read after fold_ws, so U+00A0 there is a space first.
+        for tail in (t for t in self.NOTHING if t != "565\u00a0"):
+            with self.subTest(tail=tail):
+                self.assertIsNone(check.spec_pin(f"- **Pin.** event {tail}: closed set D-001 through D-002.\n"))
+
+    def test_pin_read_line_reads_claimed(self):
+        check = import_check()
+        line = "- Kama, event {}, 2026-10-06: pin 565 read against `695b2ce`."
+        m = check.READ_LINE.match(line.format("569"))
+        self.assertEqual(m.group(2), "569")
+        self.assertEqual(check.read_kind(m.groups(), "565", None), check.COUNTED)
+        for ev in ("5\u06665", "56\u0665", "\u0665\u0666\u0665", "565x"):
+            with self.subTest(ev=ev):
+                m = check.READ_LINE.match(line.format(ev))
+                self.assertIsNone(m.group(2))
+                self.assertEqual(check.read_kind(m.groups(), "565", None), check.CLAIMED)
+
+    def test_cli_mixed_and_lettered_events_are_claimed_not_counted(self):
+        for ev in ("8\u06668", "88\u0668", "\u0668\u0668", "88x"):
+            with self.subTest(ev=ev):
+                CoverageAsciiDigits.assertClaimedNotCounted(
+                    self, self.cover(spec=SPEC.replace(READ, READ.replace("event 8", f"event {ev}"))), ev)
+
+    def test_cli_pin_line_number_nobody_wrote(self):
+        for ev in ("7x", "7\u0667", "\u0667\u0667"):
+            with self.subTest(ev=ev):
+                p = self.cover(spec=SPEC.replace("event 7:", f"event {ev}:"))
+                self.assertIn("[UNPINNED] SPEC §0 cites no pin", p.stdout)
+                self.assertNotIn("cites pin event 7", p.stdout)
+                self.assertEqual(p.returncode, 1)
+        for tail in ("7.", "7)", "7"):
+            with self.subTest(tail=tail):
+                p = self.cover(spec=SPEC.replace("event 7:", f"event {tail}"))
+                self.assertNotIn("UNPINNED", p.stdout)
 
 
 if __name__ == "__main__":
