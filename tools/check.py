@@ -119,7 +119,13 @@
 # D-number needs an Appendix B fold-source line equal (whitespace folded)
 # to its DECISIONS.md **Source:** line. Exit 0 iff no gap. Every number
 # coverage reads is ASCII 0-9, bounded in ASCII (re.ASCII; Kama #forge
-# 2026-10-28): "D-" plus Arabic-Indic digits is not a D-number. So coverage
+# 2026-10-28): "D-" plus Arabic-Indic digits is not a D-number. A D-number's
+# neighbour on each side must be absent, or ASCII and not a letter, digit or
+# underscore (Kama #forge 2026-10-29), so "D-035\u0665", "\u0665D-035" and
+# "D-0350" read nothing; a gap on that D-number names the neighbour by code
+# point, "D-035 followed by U+00A0" (Lume #forge 2026-10-29). §1–§11,
+# Dropped, Appendix B and the headings are read raw (no NFKC, no White_Space
+# fold); the Pin line is White_Space-folded first. So coverage
 # does not ask the Unicode version; its one Unicode read is the AUTHOR name
 # casefold (SPEC §0, open).
 #
@@ -844,18 +850,56 @@ def derived_marks(r, today, superseded, base: Path):
 # Coverage reads ASCII digits only (SPEC §0; Kama #forge 2026-10-28): Python's
 # \d matches any Unicode Nd digit, so "D-\u0660\u0663\u0665" was a D-number
 # and "event \u0665\u0666\u0665" a pin read. Every coverage pattern is [0-9]
-# under re.ASCII, so \b is ASCII too (@grok draft): coverage reads nothing
+# under re.ASCII (a D-number is bounded by D_BEFORE/D_AFTER below, not by
+# ASCII \b, which takes any non-ASCII character as a boundary): coverage reads nothing
 # Unicode decides but the AUTHOR name casefold in read_kind (SPEC §0), and
 # does not ask the §11.3 Unicode version.
 A = re.ASCII
-D_NUM = re.compile(r"\bD-[0-9]{3}\b", A)
+# A D-number is bounded in ASCII at both ends (SPEC §0; Kama #forge
+# 2026-10-29): ASCII \b treats any non-ASCII character as a boundary, so
+# "D-035\u0665", "D-035\u00e9" and "\u0665D-035" read D-035. Now the
+# character beside the number must be absent, or ASCII and not a letter,
+# digit or underscore, in every D-number pattern. "D-035\u2014" with no
+# space reads nothing: a visible gap, cost accepted.
+D_BEFORE = r"(?<![0-9A-Za-z_]|[^\x00-\x7f])"
+D_AFTER = r"(?![0-9A-Za-z_]|[^\x00-\x7f])"
+D_NUM = re.compile(D_BEFORE + r"D-[0-9]{3}" + D_AFTER, A)
+D_LOOSE = re.compile(r"D-[0-9]{3}", A)
 
 
-def closed_decisions(text):
-    """Closed D-numbers and their **Source:** lines (whitespace folded)."""
+def d_unread(line):
+    """[(D-number, why)] for each D-NNN in line that reads nothing because of
+    the character beside it (SPEC §0; Lume #forge 2026-10-29). The character
+    is named by code point, not by Unicode name, so it stays version-free:
+    "D-035 followed by U+00A0", "U+FEFF before D-035"."""
+    blocks = lambda c: c != "" and (not c.isascii() or c.isalnum() or c == "_")
+    out = []
+    for m in D_LOOSE.finditer(line):
+        before = line[m.start() - 1] if m.start() else ""
+        after = line[m.end()] if m.end() < len(line) else ""
+        why = ([f"U+{ord(before):04X} before {m.group()}"] if blocks(before) else []) + (
+            [f"{m.group()} followed by U+{ord(after):04X}"] if blocks(after) else [])
+        if why:
+            out.append((m.group(), " and ".join(why)))
+    return out
+
+
+def add_unread(unread, where, line):
+    """Record line's unreadable D-numbers under unread[D] as "where: why"."""
+    for d, why in d_unread(line):
+        unread.setdefault(d, []).append(f"{where}: {why}, read as no D-number")
+
+
+def closed_decisions(text, unread=None):
+    """Closed D-numbers and their **Source:** lines (whitespace folded).
+    unread, if given, collects headings whose D-number reads nothing."""
     closed = {}
+    if unread is not None:
+        for n, line in enumerate(text.splitlines(), 1):
+            if line.startswith("## "):
+                add_unread(unread, f"DECISIONS.md line {n}", line)
     for sec in re.split(r"(?m)^## ", text):
-        m = re.match(r"(D-[0-9]{3}) ·", sec, A)
+        m = re.match(r"(D-[0-9]{3})" + D_AFTER + " ·", sec, A)
         if not m:
             continue
         src = re.search(r"^- \*\*Source:\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", sec, re.S | re.M | A)
@@ -863,8 +907,11 @@ def closed_decisions(text):
     return closed
 
 
-def spec_folds(text):
-    """(cited in §1–§11 with first line, dropped, Appendix B sources)."""
+def spec_folds(text, unread=None):
+    """(cited in §1–§11 with first line, dropped, Appendix B sources).
+    Lines are read raw: no NFKC, no White_Space fold. unread, if given,
+    collects D-NNN text that reads nothing because of its neighbour."""
+    unread = {} if unread is None else unread
     lines = text.splitlines()
     try:
         start = next(i for i, l in enumerate(lines) if l.startswith("## 1. "))
@@ -875,20 +922,25 @@ def spec_folds(text):
     for n in range(start, end):
         for d in D_NUM.findall(lines[n]):
             cited.setdefault(d, n + 1)
+        add_unread(unread, f"SPEC line {n + 1}", lines[n])
     dropped, sources, section = set(), {}, None
-    for line in lines[end:]:
+    for n, line in enumerate(lines[end:], end + 1):
         if line.startswith("#"):
             section = "dropped" if re.match(r"#+ Dropped\b", line, A) else (
                 "sources" if re.match(r"#+ Appendix B\b", line, A) else None)
             continue
         if section == "dropped":
-            m = re.match(r"- \**(D-[0-9]{3})\b", line, A)
+            m = re.match(r"- \**(D-[0-9]{3})" + D_AFTER, line, A)
             if m:
                 dropped.add(m.group(1))
+            elif line.startswith("- "):
+                add_unread(unread, f"SPEC line {n} (Dropped)", line)
         elif section == "sources":
             m = re.match(r"- \*\*(D-[0-9]{3})\*\* — (.*)$", line, A)
             if m:
                 sources[m.group(1)] = fold_ws(m.group(2))
+            elif line.startswith("- "):
+                add_unread(unread, f"SPEC line {n} (Appendix B)", line)
     return cited, dropped, sources
 
 
@@ -909,11 +961,19 @@ def spec_pin(text):
         return None
     body = fold_ws(m.group(1))
     ev = PIN_EVENT.search(body)
-    rng = re.search(r"\bD-([0-9]{3}) through D-([0-9]{3})\b", body, A)
+    rng = re.search(D_BEFORE + r"D-([0-9]{3})" + D_AFTER + " through "
+                    + D_BEFORE + r"D-([0-9]{3})" + D_AFTER, body, A)
     if not ev or not rng:
         return None
     lo, hi = int(rng.group(1)), int(rng.group(2))
     return ev.group(1), {f"D-{n:03d}" for n in range(lo, hi + 1)}
+
+
+def spec_pin_unread(text):
+    """Why the Pin line's D-numbers read nothing, by code point (after the
+    White_Space fold, so U+00A0 there is a space first), or []."""
+    m = PIN_LINE.search(text)
+    return [why for _, why in d_unread(fold_ws(m.group(1)))] if m else []
 
 
 PIN_READS = re.compile(r"\*\*Pin reads\.\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", re.S | A)
@@ -991,10 +1051,13 @@ def pin_read_gaps(spec_text, decisions: Path, pin, quoted):
         if text is None:
             notes.append(f"pin read {who} ({ev}, {day}){tag} against {commit}: skipped, {why}")
             continue
-        heads = set(closed_decisions(text))
+        unread = {}
+        heads = set(closed_decisions(text, unread))
         if heads != quoted:
             diff = "; ".join(s for s in (
-                "quoted, not closed there: " + ", ".join(sorted(quoted - heads)) if quoted - heads else "",
+                "quoted, not closed there: " + ", ".join(sorted(quoted - heads))
+                + "".join(f"; {w}" for d in sorted(quoted - heads) for w in unread.get(d, []))
+                if quoted - heads else "",
                 "closed there, not quoted: " + ", ".join(sorted(heads - quoted)) if heads - quoted else "")
                 if s)
             gaps.append(("PIN READ DRIFT", "pin quote",
@@ -1013,35 +1076,46 @@ def pin_read_gaps(spec_text, decisions: Path, pin, quoted):
 
 def coverage(spec: Path, decisions: Path, pinned=None):
     """Bidirectional coverage of the pinned D-set (SPEC §0). Returns gap lines."""
-    all_closed = closed_decisions(decisions.read_text(encoding="utf-8"))
-    cited, dropped, sources = spec_folds(spec.read_text(encoding="utf-8"))
+    heads_unread, spec_unread = {}, {}
+    all_closed = closed_decisions(decisions.read_text(encoding="utf-8"), heads_unread)
+    cited, dropped, sources = spec_folds(spec.read_text(encoding="utf-8"), spec_unread)
+    # A gap on a D-number whose text read nothing beside it names the
+    # character by code point (SPEC §0; Lume #forge 2026-10-29).
+    named = lambda u, d, kinds=None: "".join(
+        f"; {w}" for w in u.get(d, []) if kinds is None or any(k in w for k in kinds))
     gaps = []
     if pinned is None:
         closed = all_closed
     else:
         for d in sorted(pinned - set(all_closed)):
-            gaps.append(("PIN DRIFT", d, "in the pin set; not closed in DECISIONS.md"))
+            gaps.append(("PIN DRIFT", d, "in the pin set; not closed in DECISIONS.md"
+                         + named(heads_unread, d)))
         closed = {d: all_closed.get(d) for d in pinned if d in all_closed}
         for d in sorted(set(all_closed) - pinned):
             if d in cited or d in dropped or d in sources:
                 gaps.append(("AHEAD OF PIN", d, "closed after the pin but already folded; re-pin first"))
     for d in sorted(closed):
         if d not in cited and d not in dropped:
-            gaps.append(("MISSING", d, "closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped"))
+            gaps.append(("MISSING", d, "closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped"
+                         + "".join(f"; {w}" for w in spec_unread.get(d, []) if "Appendix B" not in w)))
         if d in cited and d in dropped:
             gaps.append(("BOTH", d, f"listed as dropped and also cited (SPEC line {cited[d]})"))
         if d not in sources:
-            gaps.append(("NO SOURCE", d, "no Appendix B fold-source line"))
+            gaps.append(("NO SOURCE", d, "no Appendix B fold-source line"
+                         + named(spec_unread, d, ("Appendix B",))))
         elif closed[d] is None:
             gaps.append(("NO SOURCE", d, "DECISIONS.md entry has no **Source:** line"))
         elif sources[d] != closed[d]:
             gaps.append(("SOURCE DRIFT", d, "Appendix B line differs from the DECISIONS.md **Source:** line"))
     for d in sorted(set(cited) - set(closed)):
-        gaps.append(("NOT CLOSED", d, f"cited in SPEC line {cited[d]}; not closed in DECISIONS.md"))
+        gaps.append(("NOT CLOSED", d, f"cited in SPEC line {cited[d]}; not closed in DECISIONS.md"
+                     + named(heads_unread, d)))
     for d in sorted(dropped - set(closed)):
-        gaps.append(("NOT CLOSED", d, "listed as dropped; not closed in DECISIONS.md"))
+        gaps.append(("NOT CLOSED", d, "listed as dropped; not closed in DECISIONS.md"
+                     + named(heads_unread, d)))
     for d in sorted(set(sources) - set(closed)):
-        gaps.append(("NOT CLOSED", d, "has an Appendix B source; not closed in DECISIONS.md"))
+        gaps.append(("NOT CLOSED", d, "has an Appendix B source; not closed in DECISIONS.md"
+                     + named(heads_unread, d)))
     if pinned is not None:  # closed after the pin: reported once, as AHEAD OF PIN
         gaps = [g for g in gaps if not (g[0] == "NOT CLOSED" and g[1] in all_closed)]
     return closed, cited, dropped, gaps
@@ -1057,7 +1131,8 @@ def coverage_main(spec: Path, decisions: Path, pin=None):
     cited_pin = spec_pin(spec.read_text(encoding="utf-8"))
     if pin is None or cited_pin is None or cited_pin[0] != pin:
         why = ("no --pin given" if pin is None else
-               "SPEC §0 cites no pin" if cited_pin is None else
+               "SPEC §0 cites no pin" + "".join(f"; Pin line: {w}" for w in spec_pin_unread(
+                   spec.read_text(encoding="utf-8"))) if cited_pin is None else
                f"SPEC §0 cites pin event {cited_pin[0]}, run pinned to event {pin}")
         print(f"\n  [UNPINNED] {why}; coverage not asked")
         print("coverage: UNPINNED")

@@ -1865,9 +1865,11 @@ class CoverageAsciiDigits(unittest.TestCase):
             with self.subTest(d=d):
                 self.assertEqual(check.D_NUM.findall(d), [])
                 self.assertEqual(check.closed_decisions(f"## {d} · title\n\n- **Source:** x\n"), {})
-        # ASCII boundary (@grok draft): a non-ASCII character ends a number.
-        self.assertEqual(check.D_NUM.findall("D-035\u2013D-036"), ["D-035", "D-036"])
-        self.assertEqual(check.D_NUM.findall("D-035\u0665"), ["D-035"])
+        # Bounded in ASCII at both ends (Kama #forge 2026-10-29; this replaces
+        # the @grok draft in which a non-ASCII character ended a number).
+        self.assertEqual(check.D_NUM.findall("D-035\u2013D-036"), [])
+        self.assertEqual(check.D_NUM.findall("D-035 \u2013 D-036"), ["D-035", "D-036"])
+        self.assertEqual(check.D_NUM.findall("D-035\u0665"), [])
         self.assertEqual(check.D_NUM.findall("D-0355 xD-035"), [])
         self.assertIsNone(check.spec_pin(f"- **Pin.** event {self.AR_565}: closed set D-001 through D-002.\n"))
         self.assertIsNone(check.spec_pin("- **Pin.** event 565: closed set D-\u0660\u0660\u0661 through D-002.\n"))
@@ -2066,6 +2068,137 @@ class EventEndsAtAsciiBoundary(unittest.TestCase):
             with self.subTest(tail=tail):
                 p = self.cover(spec=SPEC.replace("event 7:", f"event {tail}"))
                 self.assertNotIn("UNPINNED", p.stdout)
+
+
+class DNumberBoundedBothEnds(unittest.TestCase):
+    """Kama #forge 2026-10-29: ASCII \\b treats any non-ASCII character as a
+    boundary, so "D-035\u0665", "D-035\u00e9" and "\u0665D-035" read D-035.
+    Now the character beside a D-number must be absent, or ASCII and not a
+    letter, digit or underscore, in every D-number pattern. Lume #forge
+    2026-10-29: more pins, and a gap on a D-number that reads nothing
+    because of its neighbour names that character by code point."""
+
+    cover = PinReads.cover
+    NOTHING = ("D-035\u0665", "\u0665D-035", "D-035\u00e9",           # Kama
+               "D-0350", "xD-035", "D-035_", "D-\uff10\uff13\uff15",  # Lume
+               "D-035\u2014", "D-035\u00a0", "\ufeffD-035", "D-035\u200b")
+    READS = {"(D-035)": ["D-035"], "D-035/D-036": ["D-035", "D-036"],  # Kama
+             "D-035's": ["D-035"], "D-035.": ["D-035"],                # Kama, Lume
+             "D-035-D-036": ["D-035", "D-036"], "D-035": ["D-035"],    # Lume
+             "D-035 \u2014 x": ["D-035"]}
+
+    def test_d_num_pins(self):
+        check = import_check()
+        for text in self.NOTHING:
+            with self.subTest(text=text):
+                self.assertEqual(check.D_NUM.findall(text), [])
+                self.assertEqual(check.D_NUM.findall(f"a {text} b"), [])
+        for text, want in self.READS.items():
+            with self.subTest(text=text):
+                self.assertEqual(check.D_NUM.findall(text), want)
+                self.assertEqual(check.D_NUM.findall(f"a {text} b"), want)
+
+    def test_every_d_number_pattern(self):
+        check = import_check()
+        # Dropped list and Appendix B
+        for text in ("D-035\u0665", "D-0350", "D-035_", "D-035\u00e9", "D-035\u00a0"):
+            with self.subTest(text=text):
+                spec = ("## 1. R\n\n## 2. Open questions\n\n### Dropped\n\n"
+                        f"- {text} — gone.\n- **{text}** — gone.\n")
+                self.assertEqual(check.spec_folds(spec)[1], set())
+        self.assertEqual(check.spec_folds("## 1. R\n\n## 2. Open questions\n\n### Dropped\n\n"
+                                          "- D-035 — gone.\n- **D-036** — gone.\n")[1], {"D-035", "D-036"})
+        # Pin line range, both ends of both numbers
+        ok = "- **Pin.** event 565: closed set D-001 through D-002.\n"
+        self.assertEqual(check.spec_pin(ok), ("565", {"D-001", "D-002"}))
+        for bad in ("D-001 through D-0020", "xD-001 through D-002", "D-001 through D-002\u0665",
+                    "\u0665D-001 through D-002", "D-001\u200b through D-002", "D-001 through D-002_"):
+            with self.subTest(bad=bad):
+                self.assertIsNone(check.spec_pin(ok.replace("D-001 through D-002", bad)))
+        # The Pin line is White_Space-folded first: U+00A0 is a space there.
+        self.assertEqual(check.spec_pin(ok.replace("D-002.", "D-002\u00a0.")), ("565", {"D-001", "D-002"}))
+        # DECISIONS.md heading
+        for d in ("D-001\u00a0", "D-001\u0665", "D-0010"):
+            with self.subTest(d=d):
+                self.assertEqual(check.closed_decisions(f"## {d} · t\n\n- **Source:** x\n"), {})
+        self.assertEqual(list(check.closed_decisions("## D-001 · t\n\n- **Source:** x\n")), ["D-001"])
+
+    def test_no_d_number_pattern_uses_ascii_word_boundary(self):
+        src = CHECK.read_text(encoding="utf-8")
+        code = "\n".join(l.split("#")[0] for l in src.splitlines())
+        self.assertNotIn("\\bD-", code)
+        self.assertNotIn("[0-9]{3})\\b", code)
+        self.assertNotIn("[0-9]{3}\\b", code)
+
+    def test_unread_names_code_point(self):
+        check = import_check()
+        self.assertEqual(check.d_unread("D-035\u00a0next"), [("D-035", "D-035 followed by U+00A0")])
+        self.assertEqual(check.d_unread("\ufeffD-035"), [("D-035", "U+FEFF before D-035")])
+        self.assertEqual(check.d_unread("\u0665D-035\u0665"),
+                         [("D-035", "U+0665 before D-035 and D-035 followed by U+0665")])
+        self.assertEqual(check.d_unread("(D-035) D-035-D-036 D-035's"), [])
+        self.assertEqual(check.d_unread("D-\uff10\uff13\uff15"), [])  # no ASCII number to name
+
+    def test_cli_cited_nbsp_reads_nothing_one_gap_names_u00a0(self):
+        # Lume's pin: coverage reads §1–§11 raw (no NFKC), so U+00A0 stays.
+        p = self.cover(spec=SPEC.replace("(D-002 b)", "D-002\u00a0next"))
+        self.assertIn("coverage: 1 gap(s)", p.stdout)
+        self.assertIn("[MISSING] D-002: closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped; "
+                      "SPEC line 13: D-002 followed by U+00A0, read as no D-number", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_cli_invisible_neighbours_named(self):
+        for text, why in (("\u200bD-002", "U+200B before D-002"),
+                          ("D-002\ufeff", "D-002 followed by U+FEFF"),
+                          ("D-002\u0665", "D-002 followed by U+0665"),
+                          ("D-002\u2014x", "D-002 followed by U+2014"),
+                          ("D-0020", "D-002 followed by U+0030")):
+            with self.subTest(text=text):
+                p = self.cover(spec=SPEC.replace("(D-002 b)", f"({text} b)"))
+                self.assertIn(f"[MISSING] D-002: closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped; "
+                              f"SPEC line 13: {why}, read as no D-number", p.stdout)
+                self.assertIn("coverage: 1 gap(s)", p.stdout)
+
+    def test_cli_heading_neighbour_named(self):
+        # "## \u200bD-001 ·" in DECISIONS.md is no closed heading; the gaps on
+        # D-001 name the invisible character.
+        dec = DECISIONS.replace("## D-001 ·", "## \u200bD-001 ·")
+        p = Coverage.cover(self, decisions=dec, at_pin=DECISIONS)
+        self.assertIn("[PIN DRIFT] D-001: in the pin set; not closed in DECISIONS.md; "
+                      "DECISIONS.md line 3: U+200B before D-001, read as no D-number", p.stdout)
+        self.assertIn("[NOT CLOSED] D-001: listed as dropped; not closed in DECISIONS.md; "
+                      "DECISIONS.md line 3: U+200B before D-001, read as no D-number", p.stdout)
+        self.assertEqual(p.returncode, 1)
+        # and the same heading at the pin read's commit
+        p = Coverage.cover(self, at_pin=dec)
+        self.assertIn("quoted, not closed there: D-001; "
+                      "DECISIONS.md line 3: U+200B before D-001, read as no D-number", p.stdout)
+
+    def test_bom_or_zero_width_before_a_cited_d_number(self):
+        check = import_check()
+        for ch in ("\ufeff", "\u200b"):
+            with self.subTest(ch=f"U+{ord(ch):04X}"):
+                unread = {}
+                spec = f"## 1. Rules\n{ch}D-002 is the rule.\n## 2. Open questions\n"
+                self.assertEqual(check.spec_folds(spec, unread)[0], {})
+                self.assertEqual(unread, {"D-002": [f"SPEC line 2: U+{ord(ch):04X} before D-002, "
+                                                    "read as no D-number"]})
+
+    def test_cli_dropped_and_appendix_b_neighbours_named(self):
+        p = self.cover(spec=SPEC.replace("- D-001 — process only.", "- D-001\u200b — process only."))
+        self.assertIn("[MISSING] D-001: closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped; "
+                      "SPEC line 23 (Dropped): D-001 followed by U+200B, read as no D-number", p.stdout)
+        p = self.cover(spec=SPEC.replace("- **D-001** —", "- **D-001\u00a0** —"))
+        self.assertIn("[NO SOURCE] D-001: no Appendix B fold-source line; "
+                      "SPEC line 27 (Appendix B): D-001 followed by U+00A0, read as no D-number", p.stdout)
+
+    def test_cli_pin_line_neighbour_named(self):
+        p = self.cover(spec=SPEC.replace("D-001 through D-002", "D-001 through D-002\u200b"))
+        self.assertIn("[UNPINNED] SPEC §0 cites no pin; Pin line: D-002 followed by U+200B", p.stdout)
+        self.assertEqual(p.returncode, 1)
+        # U+00A0 is White_Space: the Pin line is folded first, so it reads.
+        p = self.cover(spec=SPEC.replace("D-001 through D-002", "D-001\u00a0through D-002\u00a0"))
+        self.assertNotIn("UNPINNED", p.stdout)
 
 
 if __name__ == "__main__":
