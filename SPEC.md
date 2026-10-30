@@ -100,7 +100,31 @@ How to read it:
   never yields a shorter number: a checker that reports a number nobody
   wrote is worse than one that reads none. (Lume, `#forge` 2026-10-28;
   this replaces the @grok draft that read `event 5٦5` in the Pin line as
-  event 5.) Other coverage numbers end at any character that is not an
+  event 5.) A D-number is bounded in ASCII at both ends: the character
+  just before `D-` and the one just after the third digit must each be
+  absent (start or end of the line) or ASCII and not a letter, digit or
+  underscore. This holds for every D-number coverage reads: §1–§11, the
+  Dropped list, Appendix B, the Pin line's `D-NNN through D-NNN`, and a
+  `## D-0NN ·` heading. So `(D-035)`, `D-035/D-036`, `D-035's`, `D-035.`
+  and `D-035-D-036` read, and `D-035٥`, `٥D-035`, `D-035é`, `D-0350`,
+  `xD-035`, `D-035_` and fullwidth `D-０３５` read nothing. The cost is
+  accepted: `D-035—` with no space reads nothing and shows as a gap.
+  (Kama, `#forge` 2026-10-29; the last five pins: Lume, `#forge`
+  2026-10-29. This replaces the @grok draft in which any non-ASCII
+  character ended a number, so `D-035٥` read D-035.) The character beside
+  a D-number can be invisible (U+00A0, U+200B, U+FEFF at the start of a
+  file), so the author sees a correct `D-035` and gets a gap with no
+  visible cause. So a gap on a D-number whose text reads nothing because
+  of the character beside it names that character by code point, not by
+  Unicode name, so it stays version-free: `D-035 followed by U+00A0`,
+  `U+FEFF before D-035`. (Lume, `#forge` 2026-10-29.) Coverage reads
+  §1–§11, the Dropped list, Appendix B and the DECISIONS.md headings as
+  raw lines: not NFKC-folded and not White_Space-folded, so U+00A0 beside
+  a D-number there reads nothing. The Pin line and the pin-read lines are
+  read after the White_Space fold (§4.1 set), so U+00A0 there is a space
+  first, and only a neighbour outside White_Space, such as U+200B or
+  U+FEFF, stops a read (@grok reading of the reference checker at
+  `627d359`). Other coverage numbers end at any character that is not an
   ASCII letter, digit, or underscore (@grok draft). Coverage then reads
   nothing Unicode decides but one compare: a pin-read line's reader is
   matched with the Pin line's author after case folding (`AUTHOR`), and
@@ -1479,6 +1503,22 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   line, no pin cited in the Pin line (Lume, `#forge` 2026-10-28).
 - §0: the `AUTHOR` case fold is marked as an open call, waiting on Kama's
   call 5 (Lume, `#forge` 2026-10-28).
+
+**v0.2-draft, a D-number is bounded in ASCII at both ends**
+
+- §0: under re.ASCII, `\b` treats any non-ASCII character as a boundary,
+  so `D-035٥`, `D-035é` and `٥D-035` read D-035. Now the character on
+  each side of a D-number must be absent, or ASCII and not a letter,
+  digit or underscore, in every D-number pattern; `D-035—` with no space
+  reads nothing, a visible gap (Kama, `#forge` 2026-10-29). Extra pins:
+  `D-0350`, `xD-035`, `D-035_` and `D-０３５` read nothing; `D-035.` and
+  `D-035-D-036` read (Lume, `#forge` 2026-10-29).
+- §0: a gap on a D-number that reads nothing because of its neighbour
+  names the neighbour by code point (`D-035 followed by U+00A0`), so an
+  invisible U+00A0, U+200B or U+FEFF has a visible cause (Lume, `#forge`
+  2026-10-29). §1–§11, Dropped, Appendix B and DECISIONS.md headings are
+  read raw, not NFKC-folded; the Pin line is read after the White_Space
+  fold.
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
