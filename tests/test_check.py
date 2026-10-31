@@ -2115,8 +2115,13 @@ class DNumberBoundedBothEnds(unittest.TestCase):
                     "\u0665D-001 through D-002", "D-001\u200b through D-002", "D-001 through D-002_"):
             with self.subTest(bad=bad):
                 self.assertIsNone(check.spec_pin(ok.replace("D-001 through D-002", bad)))
-        # The Pin line is White_Space-folded first: U+00A0 is a space there.
-        self.assertEqual(check.spec_pin(ok.replace("D-002.", "D-002\u00a0.")), ("565", {"D-001", "D-002"}))
+        # The Pin line's D-numbers are read raw, like the body (Kama, Lume
+        # #forge 2026-10-30): U+00A0 beside one blocks it there too.
+        self.assertIsNone(check.spec_pin(ok.replace("D-002.", "D-002\u00a0.")))
+        self.assertEqual(check.spec_pin_unread(ok.replace("D-002.", "D-002\u00a0.")),
+                         ["D-002 followed by U+00A0"])
+        # U+00A0 elsewhere on the Pin line is White_Space-folded to find the event.
+        self.assertEqual(check.spec_pin(ok.replace("event 565", "event\u00a0565")), ("565", {"D-001", "D-002"}))
         # DECISIONS.md heading
         for d in ("D-001\u00a0", "D-001\u0665", "D-0010"):
             with self.subTest(d=d):
@@ -2139,10 +2144,12 @@ class DNumberBoundedBothEnds(unittest.TestCase):
         self.assertEqual(check.d_unread("(D-035) D-035-D-036 D-035's"), [])
         self.assertEqual(check.d_unread("D-\uff10\uff13\uff15"), [])  # no ASCII number to name
 
-    def test_cli_cited_nbsp_reads_nothing_one_gap_names_u00a0(self):
+    def test_cli_cited_nbsp_reads_nothing_gap_names_u00a0(self):
         # Lume's pin: coverage reads §1–§11 raw (no NFKC), so U+00A0 stays.
+        # The unreadable D-number is its own gap too (Kama, Lume #forge 2026-10-30).
         p = self.cover(spec=SPEC.replace("(D-002 b)", "D-002\u00a0next"))
-        self.assertIn("coverage: 1 gap(s)", p.stdout)
+        self.assertIn("[UNREADABLE] D-002: SPEC line 13: D-002 followed by U+00A0\n", p.stdout)
+        self.assertIn("coverage: 2 gap(s)", p.stdout)
         self.assertIn("[MISSING] D-002: closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped; "
                       "SPEC line 13: D-002 followed by U+00A0, read as no D-number", p.stdout)
         self.assertEqual(p.returncode, 1)
@@ -2157,7 +2164,8 @@ class DNumberBoundedBothEnds(unittest.TestCase):
                 p = self.cover(spec=SPEC.replace("(D-002 b)", f"({text} b)"))
                 self.assertIn(f"[MISSING] D-002: closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped; "
                               f"SPEC line 13: {why}, read as no D-number", p.stdout)
-                self.assertIn("coverage: 1 gap(s)", p.stdout)
+                self.assertIn(f"[UNREADABLE] D-002: SPEC line 13: {why}\n", p.stdout)
+                self.assertIn("coverage: 2 gap(s)", p.stdout)
 
     def test_cli_heading_neighbour_named(self):
         # "## \u200bD-001 ·" in DECISIONS.md is no closed heading; the gaps on
@@ -2196,9 +2204,30 @@ class DNumberBoundedBothEnds(unittest.TestCase):
         p = self.cover(spec=SPEC.replace("D-001 through D-002", "D-001 through D-002\u200b"))
         self.assertIn("[UNPINNED] SPEC §0 cites no pin; Pin line: D-002 followed by U+200B", p.stdout)
         self.assertEqual(p.returncode, 1)
-        # U+00A0 is White_Space: the Pin line is folded first, so it reads.
-        p = self.cover(spec=SPEC.replace("D-001 through D-002", "D-001\u00a0through D-002\u00a0"))
+        # U+00A0 beside a Pin-line D-number reads nothing, as in the body
+        # (Kama, Lume #forge 2026-10-30); the gap names it.
+        p = self.cover(spec=SPEC.replace("D-001 through D-002", "D-001 through D-002\u00a0"))
+        self.assertIn("[UNPINNED] SPEC §0 cites no pin; Pin line: D-002 followed by U+00A0", p.stdout)
+        self.assertEqual(p.returncode, 1)
+        # Lume's pin: a ligature before the event changes the folded length if
+        # anyone NFKC-folds; the raw pass still names U+00A0, not a space or "D".
+        p = self.cover(spec=SPEC.replace("event 7:", "\ufb01x event 7:").replace(
+            "D-001 through D-002", "D-001 through D-002\u00a0 "))
+        self.assertIn("Pin line: D-002 followed by U+00A0", p.stdout)
+        self.assertNotIn("U+0020", p.stdout)
+        # U+00A0 away from any D-number is still White_Space: the event reads.
+        p = self.cover(spec=SPEC.replace("event 7:", "event\u00a07:"))
         self.assertNotIn("UNPINNED", p.stdout)
+
+    def test_cli_every_unreadable_d_number_is_its_own_gap(self):
+        # Kama's case: Dropped "- D-001"+U+00A0 with D-001 cited cleanly in §1–§11.
+        # Without its own gap the Dropped line reads nothing, BOTH never fires, and the run passes.
+        spec = SPEC.replace("- D-001 — process only.", "- D-001\u00a0— process only.")
+        spec = spec.replace("(D-002 b)", "(D-002 b) (D-001 c)")
+        p = self.cover(spec=spec)
+        self.assertIn("[UNREADABLE] D-001: SPEC line 23 (Dropped): D-001 followed by U+00A0\n", p.stdout)
+        self.assertNotIn("[BOTH]", p.stdout)
+        self.assertEqual(p.returncode, 1)
 
 
 if __name__ == "__main__":

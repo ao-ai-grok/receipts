@@ -123,9 +123,11 @@
 # neighbour on each side must be absent, or ASCII and not a letter, digit or
 # underscore (Kama #forge 2026-10-29), so "D-035\u0665", "\u0665D-035" and
 # "D-0350" read nothing; a gap on that D-number names the neighbour by code
-# point, "D-035 followed by U+00A0" (Lume #forge 2026-10-29). §1–§11,
-# Dropped, Appendix B and the headings are read raw (no NFKC, no White_Space
-# fold); the Pin line is White_Space-folded first. So coverage
+# point, "D-035 followed by U+00A0" (Lume #forge 2026-10-29), and every such
+# D-number is its own UNREADABLE gap with line and code point (Kama, Lume
+# #forge 2026-10-30). §1–§11, Dropped, Appendix B, the headings and the Pin
+# line's D-numbers are read raw (no NFKC, no White_Space fold); the Pin line
+# is White_Space-folded only to find its event (Kama #forge 2026-10-30). So coverage
 # does not ask the Unicode version; its one Unicode read is the AUTHOR name
 # casefold (SPEC §0, open).
 #
@@ -957,8 +959,13 @@ PIN_EVENT = re.compile(r"\bevent ([0-9]+)" + EVENT_END, A)
 def spec_pin(text):
     """(event id, set of D-numbers) quoted in SPEC §0, or None."""
     m = PIN_LINE.search(text)
-    if not m:
+    if not m or d_unread(m.group(1)):
         return None
+    # The event is found in the White_Space-folded line; the D-numbers'
+    # neighbours are read raw, in their own pass over the raw line, like the
+    # body (Kama, Lume #forge 2026-10-30): U+00A0 beside a D-number means the
+    # same thing anywhere in the file. No position is carried from the folded
+    # line to the raw one, so a fold that changes length can't misname it.
     body = fold_ws(m.group(1))
     ev = PIN_EVENT.search(body)
     rng = re.search(D_BEFORE + r"D-([0-9]{3})" + D_AFTER + " through "
@@ -970,10 +977,10 @@ def spec_pin(text):
 
 
 def spec_pin_unread(text):
-    """Why the Pin line's D-numbers read nothing, by code point (after the
-    White_Space fold, so U+00A0 there is a space first), or []."""
+    """Why the Pin line's D-numbers read nothing, by code point, read on the
+    raw line (not folded), so U+00A0 beside a D-number is named, or []."""
     m = PIN_LINE.search(text)
-    return [why for _, why in d_unread(fold_ws(m.group(1)))] if m else []
+    return [why for _, why in d_unread(m.group(1))] if m else []
 
 
 PIN_READS = re.compile(r"\*\*Pin reads\.\*\*(.*?)(?=\n- \*\*|\n\n|\Z)", re.S | A)
@@ -1083,7 +1090,12 @@ def coverage(spec: Path, decisions: Path, pinned=None):
     # character by code point (SPEC §0; Lume #forge 2026-10-29).
     named = lambda u, d, kinds=None: "".join(
         f"; {w}" for w in u.get(d, []) if kinds is None or any(k in w for k in kinds))
-    gaps = []
+    # Every D-number that reads nothing because of its neighbour is its own
+    # gap, kind UNREADABLE, with line and code point (Kama, Lume #forge
+    # 2026-10-30): "- D-035"+U+00A0 under Dropped with D-035 cited cleanly in
+    # §5 would otherwise pass, and BOTH would never fire.
+    gaps = [("UNREADABLE", d, w.replace(", read as no D-number", ""))
+            for u in (heads_unread, spec_unread) for d in sorted(u) for w in u[d]]
     if pinned is None:
         closed = all_closed
     else:
