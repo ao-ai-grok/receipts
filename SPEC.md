@@ -117,14 +117,23 @@ How to read it:
   visible cause. So a gap on a D-number whose text reads nothing because
   of the character beside it names that character by code point, not by
   Unicode name, so it stays version-free: `D-035 followed by U+00A0`,
-  `U+FEFF before D-035`. (Lume, `#forge` 2026-10-29.) Coverage reads
-  §1–§11, the Dropped list, Appendix B and the DECISIONS.md headings as
-  raw lines: not NFKC-folded and not White_Space-folded, so U+00A0 beside
-  a D-number there reads nothing. The Pin line and the pin-read lines are
-  read after the White_Space fold (§4.1 set), so U+00A0 there is a space
-  first, and only a neighbour outside White_Space, such as U+200B or
-  U+FEFF, stops a read (@grok reading of the reference checker at
-  `627d359`). Other coverage numbers end at any character that is not an
+  `U+FEFF before D-035`. (Lume, `#forge` 2026-10-29.) Every D-number that
+  reads nothing because of its neighbour is its own gap, `UNREADABLE`,
+  naming line and code point, even when the same D-number reads cleanly
+  elsewhere: `- D-035` + U+00A0 under Dropped with D-035 cited in §5
+  would otherwise read nothing, never fire `BOTH`, and pass. The cost: an
+  example of an unreadable D-number in §1–§11 must be escaped; today
+  only §0 and §13 quote one, and coverage doesn't read them. (Kama,
+  `#forge` 2026-10-30.) One rule for a D-number's neighbours wherever it
+  sits: coverage reads §1–§11, the Dropped list, Appendix B, the
+  DECISIONS.md headings and the Pin line's D-numbers as raw lines, not
+  NFKC-folded and not White_Space-folded, so U+00A0 beside a D-number
+  reads nothing anywhere. The Pin line is White_Space-folded (§4.1 set)
+  only to find its event; its D-numbers are read in a separate pass over
+  the raw line, never by position from the folded one, since a fold that
+  changes length would name the wrong character. So `**Pin.** event 5 …
+  D-035` + U+00A0 is `UNPINNED`, naming U+00A0. (Kama; Lume, `#forge`
+  2026-10-30.) Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
   ASCII letter, digit, or underscore (@grok draft). Coverage then reads
   nothing Unicode decides but one compare: a pin-read line's reader is
   matched with the Pin line's author after case folding (`AUTHOR`), and
@@ -1519,6 +1528,18 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   2026-10-29). §1–§11, Dropped, Appendix B and DECISIONS.md headings are
   read raw, not NFKC-folded; the Pin line is read after the White_Space
   fold.
+
+**v0.2-draft, every unreadable D-number is a gap; one neighbour rule**
+
+- §0: a D-number that read nothing because of its neighbour was named
+  only on a gap that already existed, so `- D-035` + U+00A0 under
+  Dropped, with D-035 cited cleanly in §5, passed silently. Now each one
+  is its own `UNREADABLE` gap with line and code point (Kama, `#forge`
+  2026-10-30).
+- §0: the Pin line's D-numbers were read after the White_Space fold, so
+  U+00A0 beside one read there and not in the body. Now they are read raw
+  in their own pass, like the body; the fold only finds the event (Kama;
+  Lume, `#forge` 2026-10-30).
 
 **v0.2-draft, lines-utf8-nl: split on 0a only, endings witnessed**
 
