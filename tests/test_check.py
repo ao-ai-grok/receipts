@@ -2151,7 +2151,7 @@ class DNumberBoundedBothEnds(unittest.TestCase):
         self.assertIn("[UNREADABLE] D-002: SPEC line 13: D-002 followed by U+00A0\n", p.stdout)
         self.assertIn("coverage: 2 gap(s)", p.stdout)
         self.assertIn("[MISSING] D-002: closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped; "
-                      "SPEC line 13: D-002 followed by U+00A0, read as no D-number", p.stdout)
+                      "unreadable at SPEC line 13\n", p.stdout)
         self.assertEqual(p.returncode, 1)
 
     def test_cli_invisible_neighbours_named(self):
@@ -2162,8 +2162,8 @@ class DNumberBoundedBothEnds(unittest.TestCase):
                           ("D-0020", "D-002 followed by U+0030")):
             with self.subTest(text=text):
                 p = self.cover(spec=SPEC.replace("(D-002 b)", f"({text} b)"))
-                self.assertIn(f"[MISSING] D-002: closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped; "
-                              f"SPEC line 13: {why}, read as no D-number", p.stdout)
+                self.assertIn("[MISSING] D-002: closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped; "
+                              "unreadable at SPEC line 13\n", p.stdout)
                 self.assertIn(f"[UNREADABLE] D-002: SPEC line 13: {why}\n", p.stdout)
                 self.assertIn("coverage: 2 gap(s)", p.stdout)
 
@@ -2173,9 +2173,9 @@ class DNumberBoundedBothEnds(unittest.TestCase):
         dec = DECISIONS.replace("## D-001 ·", "## \u200bD-001 ·")
         p = Coverage.cover(self, decisions=dec, at_pin=DECISIONS)
         self.assertIn("[PIN DRIFT] D-001: in the pin set; not closed in DECISIONS.md; "
-                      "DECISIONS.md line 3: U+200B before D-001, read as no D-number", p.stdout)
+                      "unreadable at DECISIONS.md line 3\n", p.stdout)
         self.assertIn("[NOT CLOSED] D-001: listed as dropped; not closed in DECISIONS.md; "
-                      "DECISIONS.md line 3: U+200B before D-001, read as no D-number", p.stdout)
+                      "unreadable at DECISIONS.md line 3\n", p.stdout)
         self.assertEqual(p.returncode, 1)
         # and the same heading at the pin read's commit
         p = Coverage.cover(self, at_pin=dec)
@@ -2195,10 +2195,12 @@ class DNumberBoundedBothEnds(unittest.TestCase):
     def test_cli_dropped_and_appendix_b_neighbours_named(self):
         p = self.cover(spec=SPEC.replace("- D-001 — process only.", "- D-001\u200b — process only."))
         self.assertIn("[MISSING] D-001: closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped; "
-                      "SPEC line 23 (Dropped): D-001 followed by U+200B, read as no D-number", p.stdout)
+                      "unreadable at SPEC line 23 (Dropped)\n", p.stdout)
+        self.assertIn("[UNREADABLE] D-001: SPEC line 23 (Dropped): D-001 followed by U+200B\n", p.stdout)
         p = self.cover(spec=SPEC.replace("- **D-001** —", "- **D-001\u00a0** —"))
         self.assertIn("[NO SOURCE] D-001: no Appendix B fold-source line; "
-                      "SPEC line 27 (Appendix B): D-001 followed by U+00A0, read as no D-number", p.stdout)
+                      "unreadable at SPEC line 27 (Appendix B)\n", p.stdout)
+        self.assertIn("[UNREADABLE] D-001: SPEC line 27 (Appendix B): D-001 followed by U+00A0\n", p.stdout)
 
     def test_cli_pin_line_neighbour_named(self):
         p = self.cover(spec=SPEC.replace("D-001 through D-002", "D-001 through D-002\u200b"))
@@ -2229,6 +2231,27 @@ class DNumberBoundedBothEnds(unittest.TestCase):
         self.assertNotIn("[BOTH]", p.stdout)
         self.assertEqual(p.returncode, 1)
 
+    def test_derived_gap_names_place_not_code_point(self):
+        # Kama's pin (#forge 2026-10-31): D-035 closed, one "D-035"+U+00A0 in
+        # the body, nothing else: two gaps, U+00A0 printed once, MISSING ends
+        # with that line.
+        p = self.cover(spec=SPEC.replace("(D-002 b)", "D-002\u00a0next"))
+        self.assertIn("coverage: 2 gap(s)", p.stdout)
+        self.assertEqual(p.stdout.count("U+00A0"), 1)
+        self.assertIn("[MISSING] D-002: closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped; "
+                      "unreadable at SPEC line 13\n", p.stdout)
+
+    def test_missing_names_every_unreadable_place(self):
+        # Lume's pin (#forge 2026-10-31): "D-002"+U+00A0 on two lines,
+        # nothing else: three gaps (two UNREADABLE, one MISSING), and MISSING
+        # lists both lines, so one run shows the whole repair.
+        spec = SPEC.replace("(D-002 b)", "D-002\u00a0next\nD-002\u00a0again")
+        p = self.cover(spec=spec)
+        self.assertIn("coverage: 3 gap(s)", p.stdout)
+        self.assertEqual(p.stdout.count("[UNREADABLE] D-002"), 2)
+        self.assertIn("[MISSING] D-002: closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped; "
+                      "unreadable at SPEC line 13, SPEC line 14\n", p.stdout)
+        self.assertEqual(p.returncode, 1)
 
 if __name__ == "__main__":
     unittest.main()

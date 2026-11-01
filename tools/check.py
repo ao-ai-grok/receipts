@@ -1088,8 +1088,14 @@ def coverage(spec: Path, decisions: Path, pinned=None):
     cited, dropped, sources = spec_folds(spec.read_text(encoding="utf-8"), spec_unread)
     # A gap on a D-number whose text read nothing beside it names the
     # character by code point (SPEC §0; Lume #forge 2026-10-29).
-    named = lambda u, d, kinds=None: "".join(
-        f"; {w}" for w in u.get(d, []) if kinds is None or any(k in w for k in kinds))
+    # On a derived gap (MISSING, PIN DRIFT, NOT CLOSED, NO SOURCE) the suffix
+    # names only the place; the UNREADABLE gap alone carries the code point,
+    # so one cause prints once (Kama #forge 2026-10-31). Every place is named,
+    # not the first, so one run shows the whole repair (Lume #forge 2026-10-31).
+    def named(u, d, kinds=None, skip=()):
+        at = [w.split(": ", 1)[0] for w in u.get(d, [])
+              if (kinds is None or any(k in w for k in kinds)) and not any(k in w for k in skip)]
+        return "; unreadable at " + ", ".join(at) if at else ""
     # Every D-number that reads nothing because of its neighbour is its own
     # gap, kind UNREADABLE, with line and code point (Kama, Lume #forge
     # 2026-10-30): "- D-035"+U+00A0 under Dropped with D-035 cited cleanly in
@@ -1109,7 +1115,7 @@ def coverage(spec: Path, decisions: Path, pinned=None):
     for d in sorted(closed):
         if d not in cited and d not in dropped:
             gaps.append(("MISSING", d, "closed in DECISIONS.md; not cited in SPEC §1–§11 and not dropped"
-                         + "".join(f"; {w}" for w in spec_unread.get(d, []) if "Appendix B" not in w)))
+                         + named(spec_unread, d, skip=("Appendix B",))))
         if d in cited and d in dropped:
             gaps.append(("BOTH", d, f"listed as dropped and also cited (SPEC line {cited[d]})"))
         if d not in sources:
