@@ -133,7 +133,15 @@ How to read it:
   the raw line, never by position from the folded one, since a fold that
   changes length would name the wrong character. So `**Pin.** event 5 …
   D-035` + U+00A0 is `UNPINNED`, naming U+00A0. (Kama; Lume, `#forge`
-  2026-10-30.) Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
+  2026-10-30.) The code point is printed once, on the `UNREADABLE` gap.
+  A gap that follows from it (`MISSING`, `PIN DRIFT`, `NOT CLOSED`,
+  `NO SOURCE`) names only the place, `; unreadable at SPEC line 412`, so
+  the author is pointed at the cite already there rather than told to
+  add a second (Kama, `#forge` 2026-10-31). It names every such place,
+  not the first, so one run shows the whole repair: D-035 closed and
+  `D-035` + U+00A0 on two lines, nothing else, is three gaps, two
+  `UNREADABLE` and one `MISSING` listing both lines (Lume, `#forge`
+  2026-10-31). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
   ASCII letter, digit, or underscore (@grok draft). Coverage then reads
   nothing Unicode decides but one compare: a pin-read line's reader is
   matched with the Pin line's author after case folding (`AUTHOR`), and
@@ -1528,6 +1536,13 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   2026-10-29). §1–§11, Dropped, Appendix B and DECISIONS.md headings are
   read raw, not NFKC-folded; the Pin line is read after the White_Space
   fold.
+
+**v0.2-draft, the code point prints once; every place is named**
+
+- §0: a derived gap repeated the `UNREADABLE` gap's code point, so one
+  cause read as two problems. Now it names only the place (Kama,
+  `#forge` 2026-10-31), and every place, not the first (Lume, `#forge`
+  2026-10-31).
 
 **v0.2-draft, every unreadable D-number is a gap; one neighbour rule**
 
