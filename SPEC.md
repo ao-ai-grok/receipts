@@ -133,15 +133,32 @@ How to read it:
   the raw line, never by position from the folded one, since a fold that
   changes length would name the wrong character. So `**Pin.** event 5 …
   D-035` + U+00A0 is `UNPINNED`, naming U+00A0. (Kama; Lume, `#forge`
-  2026-10-30.) The code point is printed once, on the `UNREADABLE` gap.
-  A gap that follows from it (`MISSING`, `PIN DRIFT`, `NOT CLOSED`,
+  2026-10-30.) The code point is printed once, where the cause is first
+  named: on the `UNREADABLE` gap. A gap that follows from it (`MISSING`, `PIN DRIFT`, `NOT CLOSED`,
   `NO SOURCE`) names only the place, `; unreadable at SPEC line 412`, so
   the author is pointed at the cite already there rather than told to
   add a second (Kama, `#forge` 2026-10-31). It names every such place,
   not the first, so one run shows the whole repair: D-035 closed and
   `D-035` + U+00A0 on two lines, nothing else, is three gaps, two
   `UNREADABLE` and one `MISSING` listing both lines (Lume, `#forge`
-  2026-10-31). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
+  2026-10-31). A `PIN READ DRIFT` line reads DECISIONS.md at another
+  commit, and nothing else in the run reads that file there, so it is the
+  first and only place that cause is named and keeps its code point:
+  `quoted, not closed there: D-001; DECISIONS.md line 3: U+200B before
+  D-001`. It names only the place, `; unreadable at DECISIONS.md line 3`,
+  when both hold: that commit's DECISIONS.md is the working tree's, and the
+  tree pass already printed that code point this run (Kama, `#forge`
+  2026-11-01). "The working tree's" is decided on bytes: the blob id of
+  DECISIONS.md at the commit equals `git hash-object` of the working-tree
+  file. Never on folded text: U+200B in the tree and U+FEFF at the commit,
+  in the same spot, fold equal, and the reader would go looking for a code
+  point the commit never had. Different blob ids, the line keeps its code
+  point (Lume, `#forge` 2026-11-01). The tree pass does print heading code
+  points (a working-tree heading with U+200B before `D-001` is an
+  `UNREADABLE` gap naming U+200B; one test pins it), so the pin holds; the
+  tree pass's `UNREADABLE` gaps are printed before the pin-read lines, and
+  `hash-object` runs with `--no-filters` so no eol rule or clean filter
+  folds the bytes first (@grok draft). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
   ASCII letter, digit, or underscore (@grok draft). Coverage then reads
   nothing Unicode decides but one compare: a pin-read line's reader is
   matched with the Pin line's author after case folding (`AUTHOR`), and
@@ -1536,6 +1553,15 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   2026-10-29). §1–§11, Dropped, Appendix B and DECISIONS.md headings are
   read raw, not NFKC-folded; the Pin line is read after the White_Space
   fold.
+
+**v0.2-draft, the code point prints once, where the cause is first named**
+
+- §0: the rule is where the cause is first named, not "derived gaps drop
+  the code point". A `PIN READ DRIFT` line reads DECISIONS.md at another
+  commit, so it keeps its code point, unless that commit's file is the
+  working tree's and the tree pass already printed it (Kama, `#forge`
+  2026-11-01); "the working tree's" is decided by blob id, not folded text
+  (Lume, `#forge` 2026-11-01).
 
 **v0.2-draft, the code point prints once; every place is named**
 
