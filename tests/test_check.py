@@ -2253,5 +2253,96 @@ class DNumberBoundedBothEnds(unittest.TestCase):
                       "unreadable at SPEC line 13, SPEC line 14\n", p.stdout)
         self.assertEqual(p.returncode, 1)
 
+
+class PinReadCodePointOnce(unittest.TestCase):
+    """Kama #forge 2026-11-01: the rule was never "derived gaps drop the code
+    point"; the code point prints once, where the cause is first named. The
+    pin-read line reads DECISIONS.md at another commit, so it keeps its code
+    point, unless that commit's DECISIONS.md is the working tree's and the
+    tree pass already printed it this run. Lume #forge 2026-11-01: "same" is
+    decided on bytes (blob ids), never after the read folds the text. Kama's
+    cut condition first: does the tree pass print heading code points?"""
+
+    cover = Coverage.cover
+    HEAD = "## \u200bD-001 ·"
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_tree_pass_prints_heading_code_point(self):
+        # The deciding test (Lume): U+200B before a D-number heading in the
+        # working tree. The tree pass prints that code point, so the pin holds.
+        dec = DECISIONS.replace("## D-001 ·", self.HEAD)
+        p = self.cover(decisions=dec)
+        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: U+200B before D-001\n", p.stdout)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_same_blob_and_tree_printed_names_place_only(self):
+        # Kama's pin: the pin commit's DECISIONS.md is the working tree's
+        # (same blob id) and the tree pass printed U+200B: the pin-read line
+        # names only the place, and U+200B prints once, before it.
+        dec = DECISIONS.replace("## D-001 ·", self.HEAD)
+        p = self.cover(decisions=dec, at_pin=dec)
+        self.assertRegex(p.stdout, r"\[PIN READ DRIFT\] pin quote: @a \(event 8\) read against [0-9a-f]+: "
+                         r"quoted, not closed there: D-001; unreadable at DECISIONS.md line 3\n")
+        self.assertEqual(p.stdout.count("U+200B"), 1)
+        self.assertLess(p.stdout.index("[UNREADABLE] D-001: DECISIONS.md line 3: U+200B before D-001"),
+                        p.stdout.index("[PIN READ DRIFT]"))
+        self.assertEqual(p.returncode, 1)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_u200b_in_tree_u_feff_at_pin_keeps_code_point(self):
+        # Lume's case: folded, the two compare equal; as bytes they differ.
+        # The pin-read line keeps U+FEFF, the code point the pin has.
+        tree = DECISIONS.replace("## D-001 ·", self.HEAD)
+        pin = DECISIONS.replace("## D-001 ·", "## \ufeffD-001 ·")
+        p = self.cover(decisions=tree, at_pin=pin)
+        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: U+200B before D-001\n", p.stdout)
+        self.assertIn("quoted, not closed there: D-001; "
+                      "DECISIONS.md line 3: U+FEFF before D-001, read as no D-number\n", p.stdout)
+        self.assertEqual(p.stdout.count("U+200B"), 1)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_different_blobs_keep_code_point(self):
+        # Same heading, same code point, but the files differ elsewhere: not
+        # the same blob, so the pin-read line keeps its code point, even
+        # though the tree pass printed the same text.
+        pin = DECISIONS.replace("## D-001 ·", self.HEAD)
+        tree = pin + "\nA line the pin commit doesn't have.\n"
+        p = self.cover(decisions=tree, at_pin=pin)
+        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: U+200B before D-001\n", p.stdout)
+        self.assertIn("quoted, not closed there: D-001; "
+                      "DECISIONS.md line 3: U+200B before D-001, read as no D-number\n", p.stdout)
+        # and a clean tree: the tree pass printed nothing, the pin line names it
+        p = self.cover(at_pin=pin)
+        self.assertNotIn("[UNREADABLE]", p.stdout)
+        self.assertIn("DECISIONS.md line 3: U+200B before D-001, read as no D-number\n", p.stdout)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_same_blob_not_printed_keeps_code_point(self):
+        # Both halves of the condition: same blob alone is not enough; the
+        # tree pass must have printed that code point this run.
+        check = import_check()
+        dec = DECISIONS.replace("## D-001 ·", self.HEAD)
+        with tempfile.TemporaryDirectory() as d:
+            git = ["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+            subprocess.run(git[:3] + ["init", "-q"], check=True)
+            path = Path(d) / "DECISIONS.md"
+            path.write_text(dec)
+            subprocess.run(git + ["add", "DECISIONS.md"], check=True)
+            subprocess.run(git + ["commit", "-q", "--no-gpg-sign", "-m", "d"], check=True)
+            sha = subprocess.run(git[:3] + ["rev-parse", "--short", "HEAD"], check=True,
+                                 capture_output=True, text=True).stdout.strip()
+            spec = SPEC.replace("abc1234", sha)
+            self.assertTrue(check.same_blob(path, sha))
+            printed = {"DECISIONS.md line 3: U+200B before D-001"}
+            for tree_printed, want in ((frozenset(), "U+200B before D-001, read as no D-number"),
+                                       (printed, "; unreadable at DECISIONS.md line 3")):
+                gaps = check.pin_read_gaps(spec, path, "7", {"D-001", "D-002"}, tree_printed)[1]
+                self.assertTrue(gaps[0][2].endswith(want), gaps)
+            # one byte changed in the tree: not the same blob
+            path.write_bytes(dec.replace("\u200b", "\ufeff").encode("utf-8"))
+            self.assertFalse(check.same_blob(path, sha))
+            self.assertFalse(check.same_blob(path, "0000000"))
+
+
 if __name__ == "__main__":
     unittest.main()

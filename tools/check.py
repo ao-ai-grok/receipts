@@ -154,6 +154,13 @@
 # wasn't compared shouldn't count as compared). The Pulse side (that the quote
 # matches post P, and that the read happened) stays a reader's check: this
 # tool cannot read Pulse and checks only the commit a line names.
+# A PIN READ DRIFT line names a heading's code point, since it reads
+# DECISIONS.md at another commit and is often the only place the cause is
+# named (Kama #forge 2026-11-01: the code point prints once, where the cause
+# is first named). It names only the place when the commit's DECISIONS.md
+# blob id equals git hash-object of the working-tree file (bytes, not folded
+# text; Lume #forge 2026-11-01) and the tree pass, printed first, already
+# printed that code point this run.
 #
 # Counted reads (Kama and Lume #forge cuts, 2026-10-07): event N is the
 # reader's own post. A line that cites no event of its own reads CLAIMED;
@@ -1041,8 +1048,29 @@ def decisions_at(decisions: Path, commit):
     return p.stdout.decode("utf-8", "replace"), None
 
 
-def pin_read_gaps(spec_text, decisions: Path, pin, quoted):
-    """Gaps and notes for the SPEC §0 pin-read lines naming this pin."""
+def _git_out(decisions: Path, *args):
+    """git's stdout, stripped, run beside decisions, or None when git can't say."""
+    try:
+        p = subprocess.run(["git", "-C", str(decisions.resolve().parent), *args], capture_output=True)
+    except OSError:
+        return None
+    return strip_ws(p.stdout.decode("ascii", "replace")) if p.returncode == 0 else None
+
+
+def same_blob(decisions: Path, commit):
+    """DECISIONS.md at commit is the working-tree file, decided on bytes (SPEC
+    §0; Lume #forge 2026-11-01): the blob id at the commit against git
+    hash-object of the file, never the folded text, so U+200B in the tree and
+    U+FEFF at the commit are not "same". --no-filters, so the bytes on disk are
+    hashed and no clean filter or eol rule folds them first (@grok draft)."""
+    at = _git_out(decisions, "rev-parse", f"{commit}:./{decisions.name}")
+    tree = _git_out(decisions, "hash-object", "--no-filters", "--", str(decisions.resolve()))
+    return at is not None and at == tree
+
+
+def pin_read_gaps(spec_text, decisions: Path, pin, quoted, tree_printed=frozenset()):
+    """Gaps and notes for the SPEC §0 pin-read lines naming this pin.
+    tree_printed: the UNREADABLE gap texts the tree pass printed this run."""
     author = spec_pin_author(spec_text)
     reads = [r + (read_kind(r, pin, author),) for r in spec_pin_reads(spec_text) if r[3] == pin]
     gaps, notes, out = [], [], []
@@ -1061,9 +1089,21 @@ def pin_read_gaps(spec_text, decisions: Path, pin, quoted):
         unread = {}
         heads = set(closed_decisions(text, unread))
         if heads != quoted:
+            # The code point prints once, where the cause is first named (Kama
+            # #forge 2026-11-01). The pin-read line reads DECISIONS.md at
+            # another commit, so it is usually the only place the cause is
+            # named, and keeps its code point. It names only the place when
+            # that commit's DECISIONS.md is the working tree's, by blob id
+            # (Lume #forge 2026-11-01), and the tree pass already printed that
+            # code point this run (Kama #forge 2026-11-01).
+            ws = [w for d in sorted(quoted - heads) for w in unread.get(d, [])]
+            if ws and same_blob(decisions, commit) and all(
+                    w.replace(", read as no D-number", "") in tree_printed for w in ws):
+                why = "; unreadable at " + ", ".join(w.split(": ", 1)[0] for w in ws)
+            else:
+                why = "".join(f"; {w}" for w in ws)
             diff = "; ".join(s for s in (
-                "quoted, not closed there: " + ", ".join(sorted(quoted - heads))
-                + "".join(f"; {w}" for d in sorted(quoted - heads) for w in unread.get(d, []))
+                "quoted, not closed there: " + ", ".join(sorted(quoted - heads)) + why
                 if quoted - heads else "",
                 "closed there, not quoted: " + ", ".join(sorted(heads - quoted)) if heads - quoted else "")
                 if s)
@@ -1159,8 +1199,14 @@ def coverage_main(spec: Path, decisions: Path, pin=None):
     print(f"  pin: event {pin}, {len(cited_pin[1])} D-numbers quoted in SPEC §0")
     if later:
         print(f"  closed after the pin (wait for the next fold): {', '.join(later)}")
+    # The tree pass runs first, so its UNREADABLE gaps are printed before any
+    # pin-read line that leans on them (Kama #forge 2026-11-01).
+    closed, cited, dropped, gaps = coverage(spec, decisions, cited_pin[1])
+    tree_unread = [g for g in gaps if g[0] == "UNREADABLE"]
+    gaps = [g for g in gaps if g[0] != "UNREADABLE"]
     reads, read_gaps, read_notes = pin_read_gaps(spec.read_text(encoding="utf-8"),
-                                                 decisions, pin, cited_pin[1])
+                                                 decisions, pin, cited_pin[1],
+                                                 {g[2] for g in tree_unread})
     kinds = [r[-1] for r in reads]
     counted = [r[1] for r in reads if r[-1] == COUNTED]
     print(f"  pin reads naming event {pin}: {len(counted)} counted"
@@ -1173,8 +1219,7 @@ def coverage_main(spec: Path, decisions: Path, pin=None):
         print(f"    {note}")
     events = sorted({pin, *(r[1] for r in reads if r[1])}, key=int)
     print(f"  NOT CHECKED: authorship of {', '.join(events)} (Pulse not readable)")
-    closed, cited, dropped, gaps = coverage(spec, decisions, cited_pin[1])
-    gaps = read_gaps + gaps
+    gaps = tree_unread + read_gaps + gaps
     folded = set(cited) & set(closed)
     print(f"  pinned and closed in {decisions.name}: {len(closed)}")
     print(f"  cited in SPEC §1–§11: {len(folded)}; dropped: {len(dropped & set(closed))}\n")
