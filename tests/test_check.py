@@ -2344,5 +2344,110 @@ class PinReadCodePointOnce(unittest.TestCase):
             self.assertFalse(check.same_blob(path, "0000000"))
 
 
+class AutocrlfCheckout(unittest.TestCase):
+    """Kama #forge 2026-11-02: --no-filters has a cost: under core.autocrlf or
+    an eol rule the working-tree bytes differ from the blob even untouched, so
+    same_blob says no and the code point prints twice. Twice is noise, never
+    is a hunt. Lume #forge 2026-11-02: under autocrlf every working-tree line
+    ends in CR; a heading reader that splits on LF only would see U+000D at
+    the end of every heading. Drop exactly one trailing CR, only that one, so
+    a stray CR inside a heading is still named."""
+
+    def cover(self, committed, edit=None, spec_crlf=False):
+        """Commit DECISIONS.md, check it out under core.autocrlf=true (CRLF in
+        the working tree), optionally edit the checked-out bytes, and run."""
+        with tempfile.TemporaryDirectory() as d:
+            git = ["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+            subprocess.run(git[:3] + ["init", "-q"], check=True)
+            subprocess.run(git[:3] + ["config", "core.autocrlf", "true"], check=True)
+            path = Path(d) / "DECISIONS.md"
+            path.write_bytes(committed.encode("utf-8"))
+            subprocess.run(git + ["add", "DECISIONS.md"], check=True, capture_output=True)
+            subprocess.run(git + ["commit", "-q", "--no-gpg-sign", "-m", "d"], check=True)
+            path.unlink()
+            subprocess.run(git[:3] + ["checkout", "--", "DECISIONS.md"], check=True)
+            raw = path.read_bytes()
+            self.assertIn(b"\r\n", raw)  # autocrlf did write CRLF
+            self.assertEqual(raw.count(b"\r\n"), committed.count("\n"))
+            if edit:
+                path.write_bytes(edit(raw))
+            sha = subprocess.run(git[:3] + ["rev-parse", "--short", "HEAD"], check=True,
+                                 capture_output=True, text=True).stdout.strip()
+            spec = SPEC.replace("abc1234", sha)
+            (Path(d) / "SPEC.md").write_bytes(
+                (spec.replace("\n", "\r\n") if spec_crlf else spec).encode("utf-8"))
+            check = import_check()
+            same = check.same_blob(path, sha)
+            return same, subprocess.run([sys.executable, str(CHECK), "--coverage", str(Path(d) / "SPEC.md"),
+                                         str(path), "--pin", "7"], capture_output=True, text=True)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_lume_untouched_crlf_checkout_reads_clean(self):
+        # Lume's test: Kama's pin file with no U+200B, checked out under
+        # autocrlf. Every working-tree line ends in CR. Expected: 0 gaps.
+        same, p = self.cover(DECISIONS)
+        self.assertFalse(same)  # the cost: untouched, yet not the same bytes
+        self.assertNotIn("U+000D", p.stdout)
+        self.assertIn("coverage: 0 gap(s)", p.stdout)
+        self.assertEqual(p.returncode, 0, p.stdout)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_pin_crlf_keeps_code_point_twice(self):
+        # Kama's pin: the same DECISIONS.md committed, checked out under
+        # autocrlf, U+200B before D-001 in both. same_blob says no (CRLF in
+        # the tree, LF in the blob), so the pin-read line keeps U+200B: it
+        # prints twice, tree gap first. Twice is noise, never is a hunt.
+        dec = DECISIONS.replace("## D-001 ·", "## \u200bD-001 ·")
+        same, p = self.cover(dec)
+        self.assertFalse(same)
+        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: U+200B before D-001\n", p.stdout)
+        self.assertIn("quoted, not closed there: D-001; "
+                      "DECISIONS.md line 3: U+200B before D-001, read as no D-number\n", p.stdout)
+        self.assertEqual(p.stdout.count("U+200B"), 2)
+        self.assertLess(p.stdout.index("[UNREADABLE]"), p.stdout.index("[PIN READ DRIFT]"))
+        self.assertNotIn("U+000D", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_mid_heading_cr_still_named(self):
+        # Only the one trailing CR is dropped. A stray CR inside a heading
+        # (here between D-001 and its " ·") is named by code point, under
+        # autocrlf (CRLF line ends around it) and without.
+        edit = lambda raw: raw.replace(b"## D-001 \xc2\xb7", b"## D-001\r \xc2\xb7")
+        same, p = self.cover(DECISIONS, edit)
+        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: U+000D in the heading after D-001\n",
+                      p.stdout)
+        self.assertEqual(p.stdout.count("U+000D"), 1, p.stdout)
+        self.assertEqual(p.returncode, 1)
+        p = Coverage.cover(self, decisions=DECISIONS.replace("## D-001 ·", "## D-001\r ·"))
+        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: U+000D in the heading after D-001\n",
+                      p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_one_trailing_cr_only(self):
+        # Exactly one trailing CR is the line end; the reader splits on LF
+        # only, so a lone CR never breaks a line (str.splitlines would).
+        check = import_check()
+        unread = {}
+        self.assertEqual(check.closed_decisions(DECISIONS.replace("\n", "\r\n"), unread),
+                         check.closed_decisions(DECISIONS))
+        self.assertEqual(unread, {})
+        self.assertEqual(check.lf_lines("a\r\r\nb\rc\n"), ["a\r", "b\rc", ""])
+        # A CR after " ·" leaves the heading closed, and an Open heading's CR
+        # closes nothing: neither is named.
+        for dec in (DECISIONS.replace("· Process", "· Pro\rcess"),
+                    DECISIONS.replace("## Open · D-003", "## Open \r· D-003")):
+            unread = {}
+            self.assertEqual(set(check.closed_decisions(dec, unread)), {"D-001", "D-002"})
+            self.assertEqual(unread, {})
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_crlf_spec_reads_clean(self):
+        # Body coverage: SPEC.md under autocrlf too. Its lines are read
+        # through Path.read_text, which turns CRLF into LF: 0 gaps.
+        same, p = self.cover(DECISIONS, spec_crlf=True)
+        self.assertIn("coverage: 0 gap(s)", p.stdout)
+        self.assertEqual(p.returncode, 0, p.stdout)
+
 if __name__ == "__main__":
     unittest.main()

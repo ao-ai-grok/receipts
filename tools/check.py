@@ -899,14 +899,42 @@ def add_unread(unread, where, line):
         unread.setdefault(d, []).append(f"{where}: {why}, read as no D-number")
 
 
+CLOSED_HEAD = re.compile(r"## (D-[0-9]{3})" + D_AFTER + " ·", A)
+
+
+def read_raw(path: Path):
+    """A file's text with no newline translation: Path.read_text turns CRLF
+    and a lone CR into LF, so a stray CR would read as a line break, unnamed."""
+    with open(path, encoding="utf-8", newline="") as f:
+        return f.read()
+
+
+def lf_lines(text):
+    """Lines split on LF only, each with exactly one trailing CR dropped
+    (SPEC §0; Lume #forge 2026-11-02): under core.autocrlf every working-tree
+    line ends in CR, and that one is the line end. Any other CR stays, so a
+    stray CR inside a heading is still named. Not str.splitlines, which also
+    breaks on a lone CR, U+0085, U+2028 and others, silently."""
+    return [l[:-1] if l.endswith("\r") else l for l in text.split("\n")]
+
+
 def closed_decisions(text, unread=None):
     """Closed D-numbers and their **Source:** lines (whitespace folded).
     unread, if given, collects headings whose D-number reads nothing."""
     closed = {}
+    lines = lf_lines(text)
+    text = "\n".join(lines)
     if unread is not None:
-        for n, line in enumerate(text.splitlines(), 1):
+        for n, line in enumerate(lines, 1):
             if line.startswith("## "):
                 add_unread(unread, f"DECISIONS.md line {n}", line)
+                # A CR left inside a heading, when it is why the heading
+                # reads no closed D-number, is named by code point.
+                m = CLOSED_HEAD.match(line.replace("\r", ""))
+                if "\r" in line and m and not CLOSED_HEAD.match(line):
+                    unread.setdefault(m.group(1), []).append(
+                        f"DECISIONS.md line {n}: U+000D in the heading after {m.group(1)}, "
+                        "read as no D-number")
     for sec in re.split(r"(?m)^## ", text):
         m = re.match(r"(D-[0-9]{3})" + D_AFTER + " ·", sec, A)
         if not m:
@@ -1124,7 +1152,7 @@ def pin_read_gaps(spec_text, decisions: Path, pin, quoted, tree_printed=frozense
 def coverage(spec: Path, decisions: Path, pinned=None):
     """Bidirectional coverage of the pinned D-set (SPEC §0). Returns gap lines."""
     heads_unread, spec_unread = {}, {}
-    all_closed = closed_decisions(decisions.read_text(encoding="utf-8"), heads_unread)
+    all_closed = closed_decisions(read_raw(decisions), heads_unread)
     cited, dropped, sources = spec_folds(spec.read_text(encoding="utf-8"), spec_unread)
     # A gap on a D-number whose text read nothing beside it names the
     # character by code point (SPEC §0; Lume #forge 2026-10-29).
@@ -1195,7 +1223,7 @@ def coverage_main(spec: Path, decisions: Path, pin=None):
         print(f"\n  [UNPINNED] {why}; coverage not asked")
         print("coverage: UNPINNED")
         sys.exit(1)
-    later = sorted(set(closed_decisions(decisions.read_text(encoding="utf-8"))) - cited_pin[1])
+    later = sorted(set(closed_decisions(read_raw(decisions))) - cited_pin[1])
     print(f"  pin: event {pin}, {len(cited_pin[1])} D-numbers quoted in SPEC §0")
     if later:
         print(f"  closed after the pin (wait for the next fold): {', '.join(later)}")
