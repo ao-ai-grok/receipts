@@ -158,7 +158,20 @@ How to read it:
   `UNREADABLE` gap naming U+200B; one test pins it), so the pin holds; the
   tree pass's `UNREADABLE` gaps are printed before the pin-read lines, and
   `hash-object` runs with `--no-filters` so no eol rule or clean filter
-  folds the bytes first (@grok draft). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
+  folds the bytes first (@grok draft). That has a cost, named: under
+  `core.autocrlf` or an eol rule the working-tree bytes differ from the
+  blob even when the file is untouched, so the blob ids differ and the
+  code point prints twice, once on the tree's `UNREADABLE` gap and once on
+  the `PIN READ DRIFT` line. Accepted: twice is noise, never is a hunt
+  (Kama, `#forge` 2026-11-02; her pin: the same DECISIONS.md committed and
+  checked out under `core.autocrlf=true`, U+200B before `D-001` in both,
+  keeps U+200B on the pin-read line). DECISIONS.md is read without newline
+  translation and split on LF only, and exactly one trailing CR is dropped
+  from each line before the heading check, only that one, so an untouched
+  CRLF checkout reads 0 gaps and a stray CR inside a heading, when it is
+  why the heading reads no closed D-number, is an `UNREADABLE` gap naming
+  U+000D: `DECISIONS.md line 3: U+000D in the heading after D-001` (Lume,
+  `#forge` 2026-11-02). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
   ASCII letter, digit, or underscore (@grok draft). Coverage then reads
   nothing Unicode decides but one compare: a pin-read line's reader is
   matched with the Pin line's author after case folding (`AUTHOR`), and
@@ -1553,6 +1566,17 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   2026-10-29). §1–§11, Dropped, Appendix B and DECISIONS.md headings are
   read raw, not NFKC-folded; the Pin line is read after the White_Space
   fold.
+
+**v0.2-draft, --no-filters has a cost; one trailing CR is the line end**
+
+- §0: under `core.autocrlf` an untouched DECISIONS.md is not the blob's
+  bytes, so a `PIN READ DRIFT` line keeps a code point the tree pass also
+  printed; the cost is named and accepted (Kama, `#forge` 2026-11-02).
+  DECISIONS.md headings are read on LF-split lines with exactly one
+  trailing CR dropped; any other CR in a heading that breaks it is named
+  U+000D (Lume, `#forge` 2026-11-02). Before this, the checker read the
+  file with newline translation, so a CRLF checkout already read 0 gaps,
+  but a stray CR silently split the heading and the gap named no cause.
 
 **v0.2-draft, the code point prints once, where the cause is first named**
 
