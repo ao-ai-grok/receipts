@@ -165,13 +165,38 @@ How to read it:
   the `PIN READ DRIFT` line. Accepted: twice is noise, never is a hunt
   (Kama, `#forge` 2026-11-02; her pin: the same DECISIONS.md committed and
   checked out under `core.autocrlf=true`, U+200B before `D-001` in both,
-  keeps U+200B on the pin-read line). DECISIONS.md is read without newline
-  translation and split on LF only, and exactly one trailing CR is dropped
-  from each line before the heading check, only that one, so an untouched
-  CRLF checkout reads 0 gaps and a stray CR inside a heading, when it is
-  why the heading reads no closed D-number, is an `UNREADABLE` gap naming
-  U+000D: `DECISIONS.md line 3: U+000D in the heading after D-001` (Lume,
-  `#forge` 2026-11-02). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
+  keeps U+200B on the pin-read line). SPEC.md and DECISIONS.md are read
+  one way: without newline translation, split on LF only, and exactly one
+  trailing CR is dropped from each line, only that one, so an untouched
+  CRLF checkout reads 0 gaps and every line number a gap names is
+  `grep -n`'s (Lume, `#forge` 2026-11-02; SPEC too, one reader for both
+  files: Kama, `#forge` 2026-11-03). Python's `str.splitlines` also breaks
+  a line at U+000B, U+000C, U+000D, U+001C, U+001D, U+001E, U+0085,
+  U+2028 and U+2029 (Lume's list, `#forge` 2026-11-03, checked over every
+  code point), so one of them in §0 prose put every later SPEC gap one
+  line past `grep -n`'s. Those nine (U+000D other than the one trailing
+  CR) are never a line break here, and none sits silently inside a line:
+  every line in either file that holds one is a `LINE BREAK` gap naming
+  file, `grep -n` line and code point, each code point once per line:
+  `SPEC line 5: U+2029, a line break to str.splitlines, not to grep -n`
+  (Lume, `#forge` 2026-11-03). Everywhere, not only beside a D-number:
+  after the LF split the checker's numbering is right, but editors and
+  other readers still break there, so "SPEC line 412" means one line to
+  everyone only when none is left (@grok draft). Every line, not only
+  where the code point is first seen, so one run shows the whole repair
+  (as Lume, `#forge` 2026-10-31). Where that code point on that line is
+  already why a D-number reads nothing, the `UNREADABLE` gap names it and
+  `LINE BREAK` does not repeat it: one inside a heading, when it is why
+  the heading reads no closed D-number, is `UNREADABLE`: `DECISIONS.md
+  line 3: U+000D in the heading after D-001` (Lume, `#forge` 2026-11-02;
+  all nine since 2026-11-03), and U+2028 just after a D-number is the
+  neighbour gap, `D-035 followed by U+2028`. A CR that breaks nothing (after
+  ` ·`, in prose) was silent before; it is now a `LINE BREAK` gap, as
+  Kama's "any other CR gets named" reads (`#forge` 2026-11-03). The cost:
+  a literal one of the nine can't be quoted anywhere in either file; write
+  `U+2028`. `LINE BREAK` is a draft name, and it reads the working tree
+  only, not DECISIONS.md at a pin-read commit, where the heading rule
+  alone applies (@grok draft). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
   ASCII letter, digit, or underscore (@grok draft). Coverage then reads
   nothing Unicode decides but one compare: a pin-read line's reader is
   matched with the Pin line's author after case folding (`AUTHOR`), and
@@ -1566,6 +1591,19 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   2026-10-29). §1–§11, Dropped, Appendix B and DECISIONS.md headings are
   read raw, not NFKC-folded; the Pin line is read after the White_Space
   fold.
+
+**v0.2-draft, one reader for both files; nine code points are not line breaks**
+
+- §0: SPEC.md is read like DECISIONS.md: no newline translation, LF
+  split, one trailing CR dropped (Kama, `#forge` 2026-11-03). Before,
+  SPEC went through `Path.read_text` and `str.splitlines`, so U+2028 in §0
+  prose put the gap for `D-035` + U+00A0 in §5 at SPEC line 18 while
+  `grep -n` said 17, and U+2029 in §0 put `D-012` + U+000B's line at 18
+  too, neither code point named. Now each line holding U+000B, U+000C,
+  U+000D (not the trailing one), U+001C, U+001D, U+001E, U+0085, U+2028
+  or U+2029 is a `LINE BREAK` gap with file, `grep -n` line and code point,
+  unless an `UNREADABLE` gap already names it there (Lume, `#forge`
+  2026-11-03). The DECISIONS.md heading rule names all nine, not only CR.
 
 **v0.2-draft, --no-filters has a cost; one trailing CR is the line end**
 
