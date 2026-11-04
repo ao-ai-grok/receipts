@@ -914,8 +914,38 @@ def lf_lines(text):
     (SPEC §0; Lume #forge 2026-11-02): under core.autocrlf every working-tree
     line ends in CR, and that one is the line end. Any other CR stays, so a
     stray CR inside a heading is still named. Not str.splitlines, which also
-    breaks on a lone CR, U+0085, U+2028 and others, silently."""
+    breaks on the BREAKS below, silently, and moves every later line number
+    off grep -n's (Kama, Lume #forge 2026-11-03)."""
     return [l[:-1] if l.endswith("\r") else l for l in text.split("\n")]
+
+
+def lf_text(path: Path):
+    """One reader for SPEC.md and DECISIONS.md (SPEC §0; Kama #forge
+    2026-11-03): read_raw, then lf_lines, joined on LF. Line n of this text
+    is grep -n's line n."""
+    return "\n".join(lf_lines(read_raw(path)))
+
+
+# Every code point but LF that str.splitlines breaks a line at (Lume #forge
+# 2026-11-03; checked over all 0x110000 by a test). None is a line break to
+# coverage, and none sits silently inside a line: each is named (SPEC §0).
+BREAKS = "\x0b\x0c\r\x1c\x1d\x1e\x85\u2028\u2029"
+
+
+def line_breaks(lines, where, named=()):
+    """(place, text) LINE BREAK gaps, one per line holding any of BREAKS, each code
+    point once per line, by grep -n's line (SPEC §0; Lume #forge
+    2026-11-03). named: UNREADABLE texts already printed; a code point one
+    of them names on that line is not repeated (the code point prints once)."""
+    out = []
+    for n, line in enumerate(lines, 1):
+        at = f"{where} line {n}"
+        mine = [w for w in named if w == at or w.startswith((at + ":", at + " ("))]
+        cps = [f"U+{ord(c):04X}" for c in dict.fromkeys(c for c in line if c in BREAKS)]
+        cps = [cp for cp in cps if not any(cp in w for w in mine)]
+        if cps:
+            out.append((at, f"{', '.join(cps)}, a line break to str.splitlines, not to grep -n"))
+    return out
 
 
 def closed_decisions(text, unread=None):
@@ -928,12 +958,26 @@ def closed_decisions(text, unread=None):
         for n, line in enumerate(lines, 1):
             if line.startswith("## "):
                 add_unread(unread, f"DECISIONS.md line {n}", line)
-                # A CR left inside a heading, when it is why the heading
-                # reads no closed D-number, is named by code point.
-                m = CLOSED_HEAD.match(line.replace("\r", ""))
-                if "\r" in line and m and not CLOSED_HEAD.match(line):
+                # A CR, or any of BREAKS, left inside a heading, when it is
+                # why the heading reads no closed D-number, is named by code
+                # point (Lume #forge 2026-11-02; all nine: 2026-11-03),
+                # unless the neighbour rule above already named it.
+                bare = "".join(c for c in line if c not in BREAKS)
+                m = CLOSED_HEAD.match(bare)
+                if m and not CLOSED_HEAD.match(line) and not d_unread(line):
+                    # Only the ones inside "## D-0NN ·" are why; one after
+                    # " ·" is left to LINE BREAK.
+                    head, kept = [], 0
+                    for c in line:
+                        if kept == m.end():
+                            break
+                        if c in BREAKS:
+                            head.append(c)
+                        else:
+                            kept += 1
+                    cps = ", ".join(f"U+{ord(c):04X}" for c in dict.fromkeys(head))
                     unread.setdefault(m.group(1), []).append(
-                        f"DECISIONS.md line {n}: U+000D in the heading after {m.group(1)}, "
+                        f"DECISIONS.md line {n}: {cps} in the heading after {m.group(1)}, "
                         "read as no D-number")
     for sec in re.split(r"(?m)^## ", text):
         m = re.match(r"(D-[0-9]{3})" + D_AFTER + " ·", sec, A)
@@ -949,7 +993,7 @@ def spec_folds(text, unread=None):
     Lines are read raw: no NFKC, no White_Space fold. unread, if given,
     collects D-NNN text that reads nothing because of its neighbour."""
     unread = {} if unread is None else unread
-    lines = text.splitlines()
+    lines = lf_lines(text)  # not str.splitlines (Kama #forge 2026-11-03)
     try:
         start = next(i for i, l in enumerate(lines) if l.startswith("## 1. "))
         end = next(i for i, l in enumerate(lines) if re.match(r"## [0-9]+\. Open questions", l, A))
@@ -1035,7 +1079,7 @@ def spec_pin_reads(text):
     if not m:
         return []
     items = []
-    for line in m.group(1).splitlines():
+    for line in lf_lines(m.group(1)):
         if re.match(WS_CLASS + r"+- ", line, A):
             items.append(strip_ws(line))
         elif items and strip_ws(line):
@@ -1153,7 +1197,7 @@ def coverage(spec: Path, decisions: Path, pinned=None):
     """Bidirectional coverage of the pinned D-set (SPEC §0). Returns gap lines."""
     heads_unread, spec_unread = {}, {}
     all_closed = closed_decisions(read_raw(decisions), heads_unread)
-    cited, dropped, sources = spec_folds(spec.read_text(encoding="utf-8"), spec_unread)
+    cited, dropped, sources = spec_folds(lf_text(spec), spec_unread)
     # A gap on a D-number whose text read nothing beside it names the
     # character by code point (SPEC §0; Lume #forge 2026-10-29).
     # On a derived gap (MISSING, PIN DRIFT, NOT CLOSED, NO SOURCE) the suffix
@@ -1170,6 +1214,12 @@ def coverage(spec: Path, decisions: Path, pinned=None):
     # §5 would otherwise pass, and BOTH would never fire.
     gaps = [("UNREADABLE", d, w.replace(", read as no D-number", ""))
             for u in (heads_unread, spec_unread) for d in sorted(u) for w in u[d]]
+    # Each line holding a code point str.splitlines breaks at is named, in
+    # both files, everywhere, by grep -n's line (Lume #forge 2026-11-03).
+    printed = [g[2] for g in gaps]
+    for f, where in ((spec, "SPEC"), (decisions, "DECISIONS.md")):
+        gaps += [("LINE BREAK", at, w)
+                 for at, w in line_breaks(lf_lines(read_raw(f)), where, printed)]
     if pinned is None:
         closed = all_closed
     else:
@@ -1214,11 +1264,12 @@ def coverage_main(spec: Path, decisions: Path, pin=None):
     print(f"coverage check — {spec.name} against {decisions.name}")
     print(f"  spec sha256 {hashlib.sha256(spec.read_bytes()).hexdigest()}")
     print(f"  decisions sha256 {hashlib.sha256(decisions.read_bytes()).hexdigest()}")
-    cited_pin = spec_pin(spec.read_text(encoding="utf-8"))
+    spec_text = lf_text(spec)  # one reader for both files (Kama #forge 2026-11-03)
+    cited_pin = spec_pin(spec_text)
     if pin is None or cited_pin is None or cited_pin[0] != pin:
         why = ("no --pin given" if pin is None else
                "SPEC §0 cites no pin" + "".join(f"; Pin line: {w}" for w in spec_pin_unread(
-                   spec.read_text(encoding="utf-8"))) if cited_pin is None else
+                   spec_text)) if cited_pin is None else
                f"SPEC §0 cites pin event {cited_pin[0]}, run pinned to event {pin}")
         print(f"\n  [UNPINNED] {why}; coverage not asked")
         print("coverage: UNPINNED")
@@ -1230,9 +1281,9 @@ def coverage_main(spec: Path, decisions: Path, pin=None):
     # The tree pass runs first, so its UNREADABLE gaps are printed before any
     # pin-read line that leans on them (Kama #forge 2026-11-01).
     closed, cited, dropped, gaps = coverage(spec, decisions, cited_pin[1])
-    tree_unread = [g for g in gaps if g[0] == "UNREADABLE"]
-    gaps = [g for g in gaps if g[0] != "UNREADABLE"]
-    reads, read_gaps, read_notes = pin_read_gaps(spec.read_text(encoding="utf-8"),
+    tree_unread = [g for g in gaps if g[0] in ("UNREADABLE", "LINE BREAK")]
+    gaps = [g for g in gaps if g not in tree_unread]
+    reads, read_gaps, read_notes = pin_read_gaps(spec_text,
                                                  decisions, pin, cited_pin[1],
                                                  {g[2] for g in tree_unread})
     kinds = [r[-1] for r in reads]

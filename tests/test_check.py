@@ -2443,11 +2443,136 @@ class AutocrlfCheckout(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("git"), "git not installed")
     def test_crlf_spec_reads_clean(self):
-        # Body coverage: SPEC.md under autocrlf too. Its lines are read
-        # through Path.read_text, which turns CRLF into LF: 0 gaps.
+        # Body coverage: SPEC.md under autocrlf too. It is read like
+        # DECISIONS.md (Kama #forge 2026-11-03): LF split, one trailing CR
+        # dropped, so no U+000D is named: 0 gaps.
         same, p = self.cover(DECISIONS, spec_crlf=True)
         self.assertIn("coverage: 0 gap(s)", p.stdout)
         self.assertEqual(p.returncode, 0, p.stdout)
+
+
+def grep_n(text, needle):
+    """grep -n's line for the first line holding needle: LF counts only."""
+    return text[:text.index(needle)].count("\n") + 1
+
+
+def five(sep, cite, prose="Mentions D-009 here, which"):
+    """The fixture SPEC with sep in §0 prose and a §5 line citing cite."""
+    return (SPEC.replace(prose, prose.replace(", ", "," + sep))
+            .replace("## 12. Open questions", f"## 5. Five\n\n- Five. {cite}next.\n\n## 12. Open questions"))
+
+
+class OneReaderBothFiles(unittest.TestCase):
+    """Kama #forge 2026-11-03: SPEC went through read_text and splitlines, so
+    U+2028 in §0 prose moved every later SPEC gap one line off grep -n's.
+    One reader for both files: read_raw, then lf_lines. Lume #forge
+    2026-11-03: splitlines breaks on nine code points besides LF; none is a
+    line break, and none sits silently inside a line: each line holding one
+    is named with file, grep -n line and code point."""
+
+    cover = PinReads.cover
+
+    def test_lume_list_is_what_splitlines_breaks_on(self):
+        check = import_check()
+        breaks = {c for c in range(0x110000) if len(("a" + chr(c) + "b").splitlines()) > 1}
+        self.assertEqual(breaks, {0x0A, *map(ord, check.BREAKS)})
+        self.assertEqual(len(check.BREAKS), 9)
+
+    def test_kama_pin_u2028_prose_nbsp_in_s5(self):
+        # Before this change: [UNREADABLE] D-035: SPEC line 18, grep -n 17,
+        # and U+2028 not named.
+        spec = five("\u2028", "D-035\u00a0")
+        n, prose = grep_n(spec, "Five. D-035"), grep_n(spec, "Mentions")
+        self.assertEqual((prose, n), (5, 17))
+        p = self.cover(spec=spec)
+        gaps = [l for l in p.stdout.splitlines() if l.startswith("  [")]
+        self.assertEqual(gaps, [
+            f"  [UNREADABLE] D-035: SPEC line {n}: D-035 followed by U+00A0",
+            f"  [LINE BREAK] SPEC line {prose}: U+2028, a line break to str.splitlines, not to grep -n"])
+        self.assertIn("coverage: 2 gap(s)", p.stdout)
+
+    def test_lume_pin_u2029_prose_vt_after_d012(self):
+        # Before this change: [NOT CLOSED] D-012: cited in SPEC line 18, grep
+        # -n 17, and neither U+2029 nor U+000B named. U+000B is ASCII and not
+        # a letter, digit or underscore, so D-012 still reads (the neighbour
+        # rule); the fixture doesn't close D-012, so its NOT CLOSED line is
+        # the third gap and also grep -n's.
+        spec = five("\u2029", "D-012\u000b")
+        n, prose = grep_n(spec, "Five. D-012"), grep_n(spec, "Mentions")
+        p = self.cover(spec=spec)
+        gaps = [l for l in p.stdout.splitlines() if l.startswith("  [")]
+        self.assertEqual(gaps, [
+            f"  [LINE BREAK] SPEC line {prose}: U+2029, a line break to str.splitlines, not to grep -n",
+            f"  [LINE BREAK] SPEC line {n}: U+000B, a line break to str.splitlines, not to grep -n",
+            f"  [NOT CLOSED] D-012: cited in SPEC line {n}; not closed in DECISIONS.md"])
+
+    def test_no_other_line_shifts(self):
+        # Every one of the nine in §0 prose: the §5 gap stays on grep -n's
+        # line, BOTH keeps its line, and only the prose line is named.
+        check = import_check()  # (D-001 b) in §1: D-001 is also dropped, so BOTH names a line
+        for c in check.BREAKS:
+            with self.subTest(cp=f"U+{ord(c):04X}"):
+                spec = five(c, "D-035\u00a0").replace("(D-002 b)", "(D-001 b) (D-002 b)")
+                p = self.cover(spec=spec)
+                gaps = [l for l in p.stdout.splitlines() if l.startswith("  [")]
+                self.assertEqual(gaps, [
+                    f"  [UNREADABLE] D-035: SPEC line 17: D-035 followed by U+00A0",
+                    f"  [LINE BREAK] SPEC line 5: U+{ord(c):04X}, a line break to str.splitlines, not to grep -n",
+                    f"  [BOTH] D-001: listed as dropped and also cited (SPEC line {grep_n(spec, '(D-001 b)')})"])
+
+    def test_every_place_once_per_line(self):
+        # Every line holding one is named, not only the first; two on one
+        # line name each code point once, in order.
+        spec = five("\u2028\u2028\x0c", "D-002 \u2028")
+        p = self.cover(spec=spec)
+        self.assertIn("[LINE BREAK] SPEC line 5: U+2028, U+000C, a line break", p.stdout)
+        self.assertIn("[LINE BREAK] SPEC line 17: U+2028, a line break", p.stdout)
+        self.assertEqual(p.stdout.count("[LINE BREAK]"), 2)
+
+    def test_decisions_body_and_cr_after_dot_named(self):
+        # DECISIONS.md is read the same way: a code point in a body line, or
+        # a CR after " ·" (silent before), is a LINE BREAK; the heading still
+        # closes, so nothing else fires.
+        for dec, line, cp in ((DECISIONS.replace("- **Author:** A", "- **Author:**\u2028A", 1), 6, "U+2028"),
+                              (DECISIONS.replace("· Process", "· Pro\rcess"), 3, "U+000D")):
+            with self.subTest(cp=cp):
+                p = Coverage.cover(self, decisions=dec, at_pin=dec)
+                gaps = [l for l in p.stdout.splitlines() if l.startswith("  [")]
+                self.assertEqual(gaps, [f"  [LINE BREAK] DECISIONS.md line {line}: {cp}, "
+                                        "a line break to str.splitlines, not to grep -n"], p.stdout)
+
+    def test_heading_rule_names_all_nine_once(self):
+        # Inside "## D-001 ·" each of the nine is why the heading reads no
+        # closed D-number: UNREADABLE names it (the neighbour rule for the
+        # non-ASCII ones), and LINE BREAK does not repeat it.
+        check = import_check()
+        for c in check.BREAKS:
+            cp = f"U+{ord(c):04X}"
+            with self.subTest(cp=cp):
+                dec = DECISIONS.replace("## D-001 ·", f"## D-001{c} ·")
+                p = Coverage.cover(self, decisions=dec)
+                why = (f"D-001 followed by {cp}" if not c.isascii()
+                       else f"{cp} in the heading after D-001")
+                self.assertIn(f"[UNREADABLE] D-001: DECISIONS.md line 3: {why}\n", p.stdout)
+                self.assertEqual(p.stdout.count(cp), 1, p.stdout)
+                self.assertNotIn("[LINE BREAK]", p.stdout)
+        # One inside the heading and one after " ·": only the first is why.
+        dec = DECISIONS.replace("## D-001 · 2026-08-07 · Process", "## D-001\x0b · 2026-08-07 · Pro\rcess")
+        p = Coverage.cover(self, decisions=dec)
+        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: U+000B in the heading after D-001\n", p.stdout)
+        self.assertIn("[LINE BREAK] DECISIONS.md line 3: U+000D, a line break", p.stdout)
+        self.assertEqual(p.stdout.count("U+000B"), 1)
+
+    def test_coverage_reads_no_splitlines(self):
+        # One reader: no coverage function splits with str.splitlines or
+        # reads with Path.read_text (comments aside).
+        src = CHECK.read_text(encoding="utf-8")
+        code = "\n".join(l.split("#")[0] for l in src.splitlines()
+                         if not l.lstrip().startswith(('"', "'")))
+        start, end = code.index("def read_raw"), code.index("def human_dispute")
+        body = "\n".join(l for l in code[start:end].split("\n") if '"""' not in l)
+        self.assertNotIn(".splitlines(", body)
+        self.assertNotIn(".read_text(", body)
 
 if __name__ == "__main__":
     unittest.main()
