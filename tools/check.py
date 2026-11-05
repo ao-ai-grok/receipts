@@ -162,6 +162,14 @@
 # text; Lume #forge 2026-11-01) and the tree pass, printed first, already
 # printed that code point this run.
 #
+# Bytes (Kama, Lume #forge 2026-11-04): both reads, the working tree and
+# DECISIONS.md at a pin-read commit, take bytes, split on LF, and decode each
+# line strictly. Each invalid sequence, bytes[start:end] of the decoder's
+# error, is named in hex and decoding resumes at its end, so every one on
+# every line is its own UNREADABLE gap with file and grep -n line. Never
+# replaced, no U+FFFD, no traceback. The rest of the line is still read; a
+# D-number beside a sequence reads nothing and its gap names the bytes.
+#
 # Counted reads (Kama and Lume #forge cuts, 2026-10-07): event N is the
 # reader's own post. A line that cites no event of its own reads CLAIMED;
 # a line marked AUTHOR, whose WHO is the pin's author, or whose event is
@@ -886,8 +894,8 @@ def d_unread(line):
     for m in D_LOOSE.finditer(line):
         before = line[m.start() - 1] if m.start() else ""
         after = line[m.end()] if m.end() < len(line) else ""
-        why = ([f"U+{ord(before):04X} before {m.group()}"] if blocks(before) else []) + (
-            [f"{m.group()} followed by U+{ord(after):04X}"] if blocks(after) else [])
+        why = ([f"{cp_at(line, m.start() - 1)} before {m.group()}"] if blocks(before) else []) + (
+            [f"{m.group()} followed by {cp_at(line, m.end())}"] if blocks(after) else [])
         if why:
             out.append((m.group(), " and ".join(why)))
     return out
@@ -902,11 +910,99 @@ def add_unread(unread, where, line):
 CLOSED_HEAD = re.compile(r"## (D-[0-9]{3})" + D_AFTER + " ·", A)
 
 
+def bad_runs(raw: bytes):
+    """[(start, end)] of each invalid UTF-8 sequence in raw: decode strictly,
+    and on an error take raw[start:end], resume at end and keep going (SPEC
+    §0; Lume #forge 2026-11-04). A strict decode stops at the first one, so
+    b"\\xff\\xfe" is two runs, ff and fe, and e2 80 before a space or the
+    line end is one run of two bytes. Spans are the decoder's maximal
+    subparts, never one byte forced."""
+    runs, at = [], 0
+    while True:
+        try:
+            raw[at:].decode("utf-8")
+            return runs
+        except UnicodeDecodeError as e:
+            runs.append((at + e.start, at + e.end))
+            at += e.end
+
+
+def decode_line(raw: bytes):
+    """One LF-split line, decoded strictly, never replaced (SPEC §0, §4.1;
+    Kama #forge 2026-11-04). Each invalid sequence stands in the text as its
+    own bytes, surrogate-escaped (U+DC80..U+DCFF, which strict UTF-8 never
+    yields), so the rest of the line is still read, a D-number beside it
+    reads nothing (it is not ASCII), and it is named as bytes in hex by
+    bad_seqs, never as a code point. No U+FFFD."""
+    out, at = [], 0
+    for start, end in bad_runs(raw):
+        out += [raw[at:start].decode("utf-8"), raw[start:end].decode("utf-8", "surrogateescape")]
+        at = end
+    return "".join(out) + raw[at:].decode("utf-8")
+
+
+def bad_seqs(line):
+    """[(i, j, "byte ff" | "bytes e2 80")]: the invalid sequences decode_line
+    left in line, by character span. Re-encoding gives the line's bytes back
+    exactly, so the runs are the decoder's own."""
+    if not any("\udc80" <= c <= "\udcff" for c in line):
+        return []
+    raw = line.encode("utf-8", "surrogateescape")
+    out = []
+    for start, end in bad_runs(raw):
+        i = len(raw[:start].decode("utf-8", "surrogateescape"))
+        j = i + (end - start)
+        out.append((i, j, ("byte " if end - start == 1 else "bytes ") + raw[start:end].hex(" ")))
+    return out
+
+
+def cp_at(line, k):
+    """The character at line[k] by code point, or, when it is part of an
+    invalid sequence, that whole sequence by its bytes in hex."""
+    if "\udc80" <= line[k] <= "\udcff":
+        return next(name for i, j, name in bad_seqs(line) if i <= k < j)
+    return f"U+{ord(line[k]):04X}"
+
+
+def lines_text(raw: bytes):
+    """The one reader's text: raw split on LF (byte 0a) before anything is
+    decoded, each line decoded by decode_line, joined on LF. Line n of the
+    text is grep -n's line n, whatever bytes are in it."""
+    return "\n".join(decode_line(l) for l in raw.split(b"\n"))
+
+
 def read_raw(path: Path):
-    """A file's text with no newline translation: Path.read_text turns CRLF
-    and a lone CR into LF, so a stray CR would read as a line break, unnamed."""
-    with open(path, encoding="utf-8", newline="") as f:
-        return f.read()
+    """A file's text with no newline translation (Path.read_text turns CRLF
+    and a lone CR into LF, so a stray CR would read as a line break,
+    unnamed), read as bytes and decoded strictly line by line: an invalid
+    byte in the working tree is a gap, not a traceback (Kama #forge
+    2026-11-04)."""
+    with open(path, "rb") as f:
+        return lines_text(f.read())
+
+
+def byte_gaps(lines, where, named=()):
+    """(place, text) UNREADABLE gaps, one per invalid sequence on every line,
+    by grep -n's line (SPEC §0; Kama, Lume #forge 2026-11-04). named: gap
+    texts already printed; a sequence one of them names on that line (a
+    D-number's neighbour) is not repeated, so its bytes print once."""
+    out = []
+    for n, line in enumerate(lines, 1):
+        seqs = bad_seqs(line)
+        if not seqs:
+            continue
+        at = f"{where} line {n}"
+        mine = [w for w in named if w.startswith((at + ":", at + " ("))]
+        said = {}
+        for _, _, name in seqs:
+            hit = re.compile("(?:followed by " + name + "|" + name + " before )(?![0-9a-f])", A)
+            said.setdefault(name, sum(len(hit.findall(w)) for w in mine))
+        for _, _, name in seqs:
+            if said[name] > 0:
+                said[name] -= 1
+                continue
+            out.append((at, f"{name}, not UTF-8, never replaced"))
+    return out
 
 
 def lf_lines(text):
@@ -1117,7 +1213,9 @@ def decisions_at(decisions: Path, commit):
         return None, "git not available"
     if p.returncode != 0:
         return None, f"{commit}:{decisions.name} not available to git here"
-    return p.stdout.decode("utf-8", "replace"), None
+    # Strict, like the tree, never "replace" (Kama #forge 2026-11-04): a
+    # replaced byte read as U+FFFD, a code point the file doesn't hold.
+    return lines_text(p.stdout), None
 
 
 def _git_out(decisions: Path, *args):
@@ -1160,6 +1258,7 @@ def pin_read_gaps(spec_text, decisions: Path, pin, quoted, tree_printed=frozense
             continue
         unread = {}
         heads = set(closed_decisions(text, unread))
+        same = None
         if heads != quoted:
             # The code point prints once, where the cause is first named (Kama
             # #forge 2026-11-01). The pin-read line reads DECISIONS.md at
@@ -1169,7 +1268,8 @@ def pin_read_gaps(spec_text, decisions: Path, pin, quoted, tree_printed=frozense
             # (Lume #forge 2026-11-01), and the tree pass already printed that
             # code point this run (Kama #forge 2026-11-01).
             ws = [w for d in sorted(quoted - heads) for w in unread.get(d, [])]
-            if ws and same_blob(decisions, commit) and all(
+            same = same_blob(decisions, commit)
+            if ws and same and all(
                     w.replace(", read as no D-number", "") in tree_printed for w in ws):
                 why = "; unreadable at " + ", ".join(w.split(": ", 1)[0] for w in ws)
             else:
@@ -1182,8 +1282,20 @@ def pin_read_gaps(spec_text, decisions: Path, pin, quoted, tree_printed=frozense
             gaps.append(("PIN READ DRIFT", "pin quote",
                          f"{who} ({ev}){tag} read against {commit}: {diff}"))
         else:
+            ws = []
             notes.append(f"pin read {who} ({ev}, {day}){tag} against {commit}: "
                          f"{len(heads)} closed headings, equal to the quote")
+        # The pin read is strict too (Kama #forge 2026-11-04): each invalid
+        # sequence at the commit is its own UNREADABLE gap with grep -n's
+        # line and bytes in hex, unless the drift line above already named
+        # it as a neighbour, or the commit's file is the working tree's by
+        # blob id: then the tree pass read the same bytes the same way and
+        # already printed every one (the bytes print once; Kama #forge
+        # 2026-11-01).
+        bad = byte_gaps(lf_lines(text), "DECISIONS.md", ws)
+        if bad and not (same if same is not None else same_blob(decisions, commit)):
+            gaps += [(UNREADABLE, "pin quote", f"{who} ({ev}){tag} read against {commit}: {at}: {w}")
+                     for at, w in bad]
     reads = out
     if not reads:
         gaps.insert(0, ("UNWITNESSED", "pin quote", f"no SPEC §0 pin-read line names event {pin}"))
@@ -1216,6 +1328,14 @@ def coverage(spec: Path, decisions: Path, pinned=None):
             for u in (heads_unread, spec_unread) for d in sorted(u) for w in u[d]]
     # Each line holding a code point str.splitlines breaks at is named, in
     # both files, everywhere, by grep -n's line (Lume #forge 2026-11-03).
+    printed = [g[2] for g in gaps]
+    # Every invalid UTF-8 sequence on every line of either file is its own
+    # UNREADABLE gap with file, grep -n line and bytes in hex, unless it is a
+    # D-number's neighbour and that gap already named it (Kama, Lume #forge
+    # 2026-11-04).
+    for f, where in ((spec, "SPEC"), (decisions, "DECISIONS.md")):
+        gaps += [("UNREADABLE", at, w)
+                 for at, w in byte_gaps(lf_lines(read_raw(f)), where, printed)]
     printed = [g[2] for g in gaps]
     for f, where in ((spec, "SPEC"), (decisions, "DECISIONS.md")):
         gaps += [("LINE BREAK", at, w)

@@ -2574,5 +2574,180 @@ class OneReaderBothFiles(unittest.TestCase):
         self.assertNotIn(".splitlines(", body)
         self.assertNotIn(".read_text(", body)
 
+
+class StrictBothReads(unittest.TestCase):
+    """Kama #forge 2026-11-04: read_raw decoded strictly, so an invalid byte
+    in the working tree was a traceback, and decisions_at decoded the pin
+    commit with "replace", so the pin-read line named U+FFFD, a code point
+    the file doesn't hold. Both reads strict; never replaced, always named.
+    Lume #forge 2026-11-04: a strict decode stops at the first bad byte;
+    split on LF first, decode each line strictly, name bytes[start:end] in
+    hex, resume at end, so every bad sequence on every line is its own gap."""
+
+    def cover(self, spec, dec, at_pin):
+        """Commit at_pin as DECISIONS.md (bytes), write spec and dec (bytes)
+        to the working tree, run --coverage --pin 7."""
+        with tempfile.TemporaryDirectory() as d:
+            git = ["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+            subprocess.run(git[:3] + ["init", "-q"], check=True)
+            (Path(d) / "DECISIONS.md").write_bytes(at_pin)
+            subprocess.run(git + ["add", "DECISIONS.md"], check=True)
+            subprocess.run(git + ["commit", "-q", "--no-gpg-sign", "-m", "d"], check=True)
+            sha = subprocess.run(git[:3] + ["rev-parse", "--short", "HEAD"], check=True,
+                                 capture_output=True, text=True).stdout.strip()
+            (Path(d) / "SPEC.md").write_bytes(spec.replace(b"abc1234", sha.encode()))
+            (Path(d) / "DECISIONS.md").write_bytes(dec)
+            p = subprocess.run([sys.executable, str(CHECK), "--coverage", str(Path(d) / "SPEC.md"),
+                                str(Path(d) / "DECISIONS.md"), "--pin", "7"], capture_output=True, text=True)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertNotIn("\ufffd", p.stdout)
+        self.assertNotIn("U+FFFD", p.stdout)
+        self.assertNotIn("U+DC", p.stdout)
+        return sha, p
+
+    S, D = SPEC.encode(), DECISIONS.encode()
+    HEAD = "## D-001 ·".encode()
+    KAMA = D.replace(HEAD, b"## D-001\xff \xc2\xb7")
+    LUME = D.replace(HEAD, b"## D-001\xff\xfe \xc2\xb7")
+    LUME_SPEC = S.replace(b"## 12. Open questions",
+                          b"## 5. Five\n\n- Five. A rule. (D-002 c) \xe2\x80\n\n## 12. Open questions")
+
+    def gaps(self, p):
+        return [l for l in p.stdout.splitlines() if l.startswith("  [")]
+
+    def test_decoder_claims(self):
+        # Lume's checks, in Python: one strict decode raises once, at ff.
+        with self.assertRaises(UnicodeDecodeError) as e:
+            b"\xff\xfe x".decode("utf-8")
+        self.assertEqual((e.exception.start, e.exception.end), (0, 1))
+        check = import_check()
+        # Resuming at end: ff and fe are two sequences of one byte each.
+        self.assertEqual(check.bad_runs(b"\xff\xfe x"), [(0, 1), (1, 2)])
+        # e2 80 before a space is one sequence of two bytes. start/end are
+        # offsets into what was decoded: (0, 2) alone, (2, 4) after "ab".
+        self.assertEqual(check.bad_runs(b"\xe2\x80 x"), [(0, 2)])
+        self.assertEqual(check.bad_runs(b"ab\xe2\x80 "), [(2, 4)])
+        # At the line end, before its LF or after the split: one sequence.
+        self.assertEqual(check.bad_runs(b"ab \xe2\x80\n"), [(3, 5)])
+        self.assertEqual(check.bad_runs(b"ab \xe2\x80"), [(3, 5)])
+        # Maximal subparts, the decoder's: a surrogate's bytes are three.
+        self.assertEqual(check.bad_runs(b"\xed\xa0\x80"), [(0, 1), (1, 2), (2, 3)])
+        self.assertEqual(check.bad_seqs(check.decode_line(b"a\xff\xfeb \xe2\x80")),
+                         [(1, 2, "byte ff"), (2, 3, "byte fe"), (5, 7, "bytes e2 80")])
+        self.assertEqual(check.decode_line(b"a\xffb").encode("utf-8", "surrogateescape"), b"a\xffb")
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_pin_ff_in_heading_committed_and_in_tree(self):
+        # Before: UnicodeDecodeError traceback (read_raw, byte 0xff).
+        # Committed at the pin and left in the tree: the blobs are the same,
+        # so ff prints once, on the tree's gap; the pin-read line names the
+        # same line by place (Kama #forge 2026-11-01).
+        sha, p = self.cover(self.S, self.KAMA, self.KAMA)
+        self.assertEqual(self.gaps(p)[:3], [
+            "  [UNREADABLE] D-001: DECISIONS.md line 3: D-001 followed by byte ff",
+            f"  [PIN READ DRIFT] pin quote: @a (event 8) read against {sha}: quoted, not closed "
+            "there: D-001; unreadable at DECISIONS.md line 3",
+            "  [PIN DRIFT] D-001: in the pin set; not closed in DECISIONS.md; "
+            "unreadable at DECISIONS.md line 3"])
+        self.assertEqual(p.stdout.count("byte ff"), 1)
+        self.assertEqual(p.returncode, 1)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_pin_read_alone_names_byte_not_fffd(self):
+        # Before: the pin-read line said "D-001 followed by U+FFFD". Tree
+        # clean, ff only at the pin: the pin-read line names byte ff.
+        sha, p = self.cover(self.S, self.D, self.KAMA)
+        self.assertEqual(self.gaps(p), [
+            f"  [PIN READ DRIFT] pin quote: @a (event 8) read against {sha}: quoted, not closed "
+            "there: D-001; DECISIONS.md line 3: D-001 followed by byte ff, read as no D-number"])
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_lume_pin_three_sequences_two_lines(self):
+        # Before: traceback (read_raw on SPEC.md, bytes e2 80). Now ff, fe
+        # and e2 80 each named once, on grep -n's lines 3 and 17.
+        spec = self.LUME_SPEC
+        self.assertEqual(spec[:spec.index(b"\xe2\x80")].count(b"\n") + 1, 17)
+        sha, p = self.cover(spec, self.LUME, self.LUME)
+        self.assertEqual(self.gaps(p)[:4], [
+            "  [UNREADABLE] D-001: DECISIONS.md line 3: D-001 followed by byte ff",
+            "  [UNREADABLE] SPEC line 17: bytes e2 80, not UTF-8, never replaced",
+            "  [UNREADABLE] DECISIONS.md line 3: byte fe, not UTF-8, never replaced",
+            f"  [PIN READ DRIFT] pin quote: @a (event 8) read against {sha}: quoted, not closed "
+            "there: D-001; unreadable at DECISIONS.md line 3"])
+        for name in ("byte ff", "byte fe", "bytes e2 80"):
+            self.assertEqual(p.stdout.count(name), 1, name)
+        # The rest of the §5 line is still read: D-002 is cited there and
+        # in §1, and nothing else on it is a gap.
+        self.assertNotIn("D-002", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_lume_pin_read_alone_names_every_sequence(self):
+        # Pin commit differs from the tree: the pin read names ff on its
+        # drift line and fe as its own gap, on the same line 3.
+        sha, p = self.cover(self.S, self.D, self.LUME)
+        self.assertEqual(self.gaps(p), [
+            f"  [PIN READ DRIFT] pin quote: @a (event 8) read against {sha}: quoted, not closed "
+            "there: D-001; DECISIONS.md line 3: D-001 followed by byte ff, read as no D-number",
+            f"  [UNREADABLE] pin quote: @a (event 8) read against {sha}: DECISIONS.md line 3: "
+            "byte fe, not UTF-8, never replaced"])
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_bytes_anywhere_named_rest_of_line_read(self):
+        # §0 prose, a DECISIONS.md body line, after " ·" in a heading: each
+        # a gap on grep -n's line; the heading still closes, and the pin
+        # read (another blob) names its own bytes; same-hex runs on one line
+        # are each named.
+        spec = self.S.replace(b"Mentions D-009", b"Mentions \xc3 D-009")
+        dec = self.D.replace("· Process".encode(), "· Pro".encode() + b"\xff\xffcess").replace(
+            b"- **Author:** A\n", b"- **Author:** A\xf0\x9f\x98\n", 1)
+        sha, p = self.cover(spec, dec, self.D)
+        self.assertEqual(self.gaps(p), [
+            "  [UNREADABLE] SPEC line 5: byte c3, not UTF-8, never replaced",
+            "  [UNREADABLE] DECISIONS.md line 3: byte ff, not UTF-8, never replaced",
+            "  [UNREADABLE] DECISIONS.md line 3: byte ff, not UTF-8, never replaced",
+            "  [UNREADABLE] DECISIONS.md line 6: bytes f0 9f 98, not UTF-8, never replaced"])
+        self.assertEqual(p.returncode, 1)
+        # The same file at the pin, tree clean: the pin read names them.
+        sha, p = self.cover(self.S, self.D, dec)
+        self.assertEqual(len([g for g in self.gaps(p) if g.startswith(
+            f"  [UNREADABLE] pin quote: @a (event 8) read against {sha}: DECISIONS.md line")]), 3)
+        self.assertIn("2 closed headings, equal to the quote", p.stdout)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_neighbour_both_sides_and_one_left(self):
+        # ff after D-001 and another ff later on the line: the neighbour gap
+        # names one, the byte gap the other. Before a D-number, the same.
+        dec = self.D.replace(self.HEAD, b"## \xffD-001 \xc2\xb7 \xff")
+        sha, p = self.cover(self.S, dec, dec)
+        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: byte ff before D-001\n", p.stdout)
+        self.assertIn("[UNREADABLE] DECISIONS.md line 3: byte ff, not UTF-8, never replaced\n", p.stdout)
+        self.assertEqual(p.stdout.count("byte ff"), 2)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_bad_bytes_before_crlf(self):
+        # Under autocrlf the line ends e2 80 0d 0a: the trailing CR is the
+        # line end, e2 80 one sequence, no U+000D named.
+        spec = self.LUME_SPEC.replace(b"\n", b"\r\n")
+        sha, p = self.cover(spec, self.D, self.D)
+        self.assertEqual(self.gaps(p), [
+            "  [UNREADABLE] SPEC line 17: bytes e2 80, not UTF-8, never replaced"])
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_pin_line_byte_is_unpinned_and_named(self):
+        spec = self.S.replace(b"closed set D-001 through", b"closed set D-001\xff through")
+        sha, p = self.cover(spec, self.D, self.D)
+        self.assertIn("[UNPINNED] SPEC §0 cites no pin; Pin line: D-001 followed by byte ff", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_coverage_never_replaces(self):
+        # No coverage read decodes with "replace" (comments aside).
+        src = CHECK.read_text(encoding="utf-8")
+        code = "\n".join(l.split("#")[0] for l in src.splitlines())
+        body = code[code.index("def bad_runs"):code.index("def human_dispute")]
+        self.assertNotIn('"utf-8", "replace"', body)
+        self.assertNotIn("errors=", body)
+
+
 if __name__ == "__main__":
     unittest.main()
