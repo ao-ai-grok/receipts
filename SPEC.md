@@ -196,7 +196,27 @@ How to read it:
   a literal one of the nine can't be quoted anywhere in either file; write
   `U+2028`. `LINE BREAK` is a draft name, and it reads the working tree
   only, not DECISIONS.md at a pin-read commit, where the heading rule
-  alone applies (@grok draft). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
+  alone applies (@grok draft). Bytes are read the same way in both reads,
+  the working tree and DECISIONS.md at a pin-read commit: as bytes, split
+  on LF (byte `0a`) before anything is decoded, each line decoded strictly
+  as UTF-8, never replaced (§4.1's rule; Kama, `#forge` 2026-11-04). A
+  strict decode stops at the first bad byte, so on an error the checker
+  names `bytes[start:end]` in hex, resumes at `end` and keeps going: every
+  invalid sequence on every line is its own `UNREADABLE` gap with file and
+  `grep -n` line, the line number from the LF split, not the decoder:
+  `SPEC line 17: bytes e2 80, not UTF-8, never replaced` (Lume, `#forge`
+  2026-11-04). A sequence is the decoder's maximal subpart: `ff fe` is two,
+  `e2 80` before a space or the line end is one of two bytes. No U+FFFD is
+  ever printed, and an invalid byte is a gap, not a traceback. The rest of
+  the line is still read, after the one trailing CR is dropped, under every
+  rule above; a sequence is not ASCII, so a D-number beside one reads
+  nothing, and that D-number's `UNREADABLE` gap names the bytes
+  (`D-001 followed by byte ff`) and the sequence is not repeated on its
+  own: the bytes print once (@grok draft). At a pin-read commit the
+  sequences are named on the `PIN READ DRIFT` line, or as `UNREADABLE`
+  gaps of the pin quote, unless that commit's DECISIONS.md is the working
+  tree's by blob id, when the tree pass already named every one (Kama,
+  `#forge` 2026-11-01). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
   ASCII letter, digit, or underscore (@grok draft). Coverage then reads
   nothing Unicode decides but one compare: a pin-read line's reader is
   matched with the Pin line's author after case folding (`AUTHOR`), and
@@ -1591,6 +1611,18 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   2026-10-29). §1–§11, Dropped, Appendix B and DECISIONS.md headings are
   read raw, not NFKC-folded; the Pin line is read after the White_Space
   fold.
+
+**v0.2-draft, both reads strict; every invalid sequence named**
+
+- §0: the working tree and DECISIONS.md at a pin-read commit are both read
+  as bytes, split on LF, each line decoded strictly as UTF-8 (Kama,
+  `#forge` 2026-11-04). Each invalid sequence is named as its bytes in hex,
+  decoding resumes after it, and each is its own `UNREADABLE` gap with file
+  and `grep -n` line (Lume, `#forge` 2026-11-04). Before, an invalid byte
+  in the working tree was a traceback (Kama's pin: `ff` inside `D-001`'s
+  heading; Lume's: `ff fe` there and `e2 80` ending a §5 line), and the
+  pin-read line, decoded with "replace", named U+FFFD, a code point the
+  file doesn't hold.
 
 **v0.2-draft, one reader for both files; nine code points are not line breaks**
 
