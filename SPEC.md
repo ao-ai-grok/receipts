@@ -201,22 +201,29 @@ How to read it:
   on LF (byte `0a`) before anything is decoded, each line decoded strictly
   as UTF-8, never replaced (§4.1's rule; Kama, `#forge` 2026-11-04). A
   strict decode stops at the first bad byte, so on an error the checker
-  names `bytes[start:end]` in hex, resumes at `end` and keeps going: every
-  invalid sequence on every line is its own `UNREADABLE` gap with file and
-  `grep -n` line, the line number from the LF split, not the decoder:
-  `SPEC line 17: bytes e2 80, not UTF-8, never replaced` (Lume, `#forge`
-  2026-11-04). A sequence is the decoder's maximal subpart: `ff fe` is two,
-  `e2 80` before a space or the line end is one of two bytes. No U+FFFD is
-  ever printed, and an invalid byte is a gap, not a traceback. The rest of
-  the line is still read, after the one trailing CR is dropped, under every
-  rule above; a sequence is not ASCII, so a D-number beside one reads
-  nothing, and that D-number's `UNREADABLE` gap names the bytes
-  (`D-001 followed by byte ff`) and the sequence is not repeated on its
-  own: the bytes print once (@grok draft). At a pin-read commit the
-  sequences are named on the `PIN READ DRIFT` line, or as `UNREADABLE`
-  gaps of the pin quote, unless that commit's DECISIONS.md is the working
-  tree's by blob id, when the tree pass already named every one (Kama,
-  `#forge` 2026-11-01). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
+  names `bytes[start:end]` in hex, resumes at `end` and keeps going. A
+  sequence is the decoder's maximal subpart: `ff fe` is two, `e2 80`
+  before a space or the line end is one of two bytes (Lume, `#forge`
+  2026-11-04). Contiguous sequences on one line are one `UNREADABLE` gap,
+  naming every sequence in the span joined with ` | `, taking the bars
+  from the strict decoder's start and end over the span's bytes: `ed a0
+  80` is `bytes ed | a0 | 80`, and `e2 80 ff` is `bytes e2 80 | ff` (Kama,
+  Lume, `#forge` 2026-11-05). A lone one-byte sequence stays `byte ff`.
+  The gap names file and `grep -n` line, the line number from the LF
+  split, not the decoder: `SPEC line 17: bytes e2 80 | ff, not UTF-8,
+  never replaced`. No U+FFFD is ever printed, and an invalid byte is a
+  gap, not a traceback. The rest of the line is still read, after the one
+  trailing CR is dropped, under every rule above; the invalid bytes stay
+  in the text (surrogateescape or equivalent), so a malformed D-number
+  cannot splice into a valid one — `D-0` + `f0 9f 98` + `12` never reads
+  as closed `D-012` (Kama, `#forge` 2026-11-05). A sequence is not ASCII,
+  so a D-number beside a span reads nothing, and that D-number's
+  `UNREADABLE` gap names the span's bytes (`D-001 followed by bytes ff |
+  fe`) and the span is not repeated on its own: the bytes print once
+  (@grok draft). At a pin-read commit the spans are named on the `PIN
+  READ DRIFT` line, or as `UNREADABLE` gaps of the pin quote, unless that
+  commit's DECISIONS.md is the working tree's by blob id, when the tree
+  pass already named every one (Kama, `#forge` 2026-11-01). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
   ASCII letter, digit, or underscore (@grok draft). Coverage then reads
   nothing Unicode decides but one compare: a pin-read line's reader is
   matched with the Pin line's author after case folding (`AUTHOR`), and
