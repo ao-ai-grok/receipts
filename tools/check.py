@@ -162,13 +162,17 @@
 # text; Lume #forge 2026-11-01) and the tree pass, printed first, already
 # printed that code point this run.
 #
-# Bytes (Kama, Lume #forge 2026-11-04): both reads, the working tree and
-# DECISIONS.md at a pin-read commit, take bytes, split on LF, and decode each
-# line strictly. Each invalid sequence, bytes[start:end] of the decoder's
-# error, is named in hex and decoding resumes at its end, so every one on
-# every line is its own UNREADABLE gap with file and grep -n line. Never
-# replaced, no U+FFFD, no traceback. The rest of the line is still read; a
-# D-number beside a sequence reads nothing and its gap names the bytes.
+# Bytes (Kama, Lume #forge 2026-11-04 / 2026-11-05): both reads, the working
+# tree and DECISIONS.md at a pin-read commit, take bytes, split on LF, and
+# decode each line strictly. Each invalid sequence, bytes[start:end] of the
+# decoder's error, is named in hex and decoding resumes at its end. Contiguous
+# sequences are one UNREADABLE gap, naming every sequence in the span joined
+# with " | " (Kama #forge 2026-11-05), taking the bars from the decoder's
+# start and end over the span's bytes (Lume #forge 2026-11-05): e.g. ed a0 80
+# is "bytes ed | a0 | 80", and e2 80 ff is "bytes e2 80 | ff". Never replaced,
+# no U+FFFD, no traceback. The rest of the line is still read under
+# surrogateescape, so a malformed D-number cannot splice into a valid one
+# (Kama); a D-number beside a span reads nothing and its gap names the bytes.
 #
 # Counted reads (Kama and Lume #forge cuts, 2026-10-07): event N is the
 # reader's own post. A line that cites no event of its own reads CLAIMED;
@@ -942,23 +946,43 @@ def decode_line(raw: bytes):
 
 
 def bad_seqs(line):
-    """[(i, j, "byte ff" | "bytes e2 80")]: the invalid sequences decode_line
-    left in line, by character span. Re-encoding gives the line's bytes back
-    exactly, so the runs are the decoder's own."""
+    """[(i, j, "byte ff" | "bytes e2 80" | "bytes ed | a0 | 80")]: one entry
+    per contiguous bad span decode_line left in line, by character span
+    (Kama, Lume #forge 2026-11-05). Sequences are still the decoder's
+    maximal subparts (bad_runs); contiguous ones are one span, named by
+    joining each sequence's hex with " | ", taking the bars from the
+    decoder's start and end over the span's bytes. A lone one-byte sequence
+    stays "byte ff". Re-encoding gives the line's bytes back exactly."""
     if not any("\udc80" <= c <= "\udcff" for c in line):
         return []
     raw = line.encode("utf-8", "surrogateescape")
+    runs = bad_runs(raw)
+    groups, g = [], []
+    for start, end in runs:
+        if g and g[-1][1] == start:
+            g.append((start, end))
+        else:
+            if g:
+                groups.append(g)
+            g = [(start, end)]
+    if g:
+        groups.append(g)
     out = []
-    for start, end in bad_runs(raw):
+    for span in groups:
+        start, end = span[0][0], span[-1][1]
         i = len(raw[:start].decode("utf-8", "surrogateescape"))
         j = i + (end - start)
-        out.append((i, j, ("byte " if end - start == 1 else "bytes ") + raw[start:end].hex(" ")))
+        parts = [raw[s:e].hex(" ") for s, e in span]
+        joined = " | ".join(parts)
+        name = ("byte " if len(span) == 1 and end - start == 1 else "bytes ") + joined
+        out.append((i, j, name))
     return out
 
 
 def cp_at(line, k):
-    """The character at line[k] by code point, or, when it is part of an
-    invalid sequence, that whole sequence by its bytes in hex."""
+    """The character at line[k] by code point, or, when it is part of a
+    contiguous bad span, that whole span by its bytes in hex (joined with
+    " | " when the span holds more than one decoder sequence)."""
     if "\udc80" <= line[k] <= "\udcff":
         return next(name for i, j, name in bad_seqs(line) if i <= k < j)
     return f"U+{ord(line[k]):04X}"
@@ -982,9 +1006,9 @@ def read_raw(path: Path):
 
 
 def byte_gaps(lines, where, named=()):
-    """(place, text) UNREADABLE gaps, one per invalid sequence on every line,
-    by grep -n's line (SPEC §0; Kama, Lume #forge 2026-11-04). named: gap
-    texts already printed; a sequence one of them names on that line (a
+    """(place, text) UNREADABLE gaps, one per contiguous bad span on every
+    line, by grep -n's line (SPEC §0; Kama, Lume #forge 2026-11-05). named:
+    gap texts already printed; a span one of them names on that line (a
     D-number's neighbour) is not repeated, so its bytes print once."""
     out = []
     for n, line in enumerate(lines, 1):
@@ -995,7 +1019,8 @@ def byte_gaps(lines, where, named=()):
         mine = [w for w in named if w.startswith((at + ":", at + " ("))]
         said = {}
         for _, _, name in seqs:
-            hit = re.compile("(?:followed by " + name + "|" + name + " before )(?![0-9a-f])", A)
+            hit = re.compile("(?:followed by " + re.escape(name) + "|"
+                             + re.escape(name) + " before )(?![0-9a-f])", A)
             said.setdefault(name, sum(len(hit.findall(w)) for w in mine))
         for _, _, name in seqs:
             if said[name] > 0:
@@ -1329,10 +1354,10 @@ def coverage(spec: Path, decisions: Path, pinned=None):
     # Each line holding a code point str.splitlines breaks at is named, in
     # both files, everywhere, by grep -n's line (Lume #forge 2026-11-03).
     printed = [g[2] for g in gaps]
-    # Every invalid UTF-8 sequence on every line of either file is its own
-    # UNREADABLE gap with file, grep -n line and bytes in hex, unless it is a
-    # D-number's neighbour and that gap already named it (Kama, Lume #forge
-    # 2026-11-04).
+    # Every contiguous bad span on every line of either file is its own
+    # UNREADABLE gap with file, grep -n line and bytes in hex (sequences in
+    # the span joined with " | "), unless it is a D-number's neighbour and
+    # that gap already named it (Kama, Lume #forge 2026-11-05).
     for f, where in ((spec, "SPEC"), (decisions, "DECISIONS.md")):
         gaps += [("UNREADABLE", at, w)
                  for at, w in byte_gaps(lf_lines(read_raw(f)), where, printed)]

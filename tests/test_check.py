@@ -2582,7 +2582,10 @@ class StrictBothReads(unittest.TestCase):
     the file doesn't hold. Both reads strict; never replaced, always named.
     Lume #forge 2026-11-04: a strict decode stops at the first bad byte;
     split on LF first, decode each line strictly, name bytes[start:end] in
-    hex, resume at end, so every bad sequence on every line is its own gap."""
+    hex, resume at end. Kama, Lume #forge 2026-11-05: contiguous sequences
+    are one gap, naming every sequence in the span joined with " | ", bars
+    from the decoder's start and end over the span's bytes; surrogateescape
+    stays, so a malformed D-number cannot splice into a valid one."""
 
     def cover(self, spec, dec, at_pin):
         """Commit at_pin as DECISIONS.md (bytes), write spec and dec (bytes)
@@ -2630,10 +2633,16 @@ class StrictBothReads(unittest.TestCase):
         # At the line end, before its LF or after the split: one sequence.
         self.assertEqual(check.bad_runs(b"ab \xe2\x80\n"), [(3, 5)])
         self.assertEqual(check.bad_runs(b"ab \xe2\x80"), [(3, 5)])
-        # Maximal subparts, the decoder's: a surrogate's bytes are three.
+        # Maximal subparts, the decoder's: a surrogate's bytes are three runs.
         self.assertEqual(check.bad_runs(b"\xed\xa0\x80"), [(0, 1), (1, 2), (2, 3)])
+        # Contiguous runs are one span, bars from the decoder's start/end
+        # (Kama, Lume #forge 2026-11-05): ed|a0|80, ff|fe, e2 80 alone.
+        self.assertEqual(check.bad_seqs(check.decode_line(b"\xed\xa0\x80")),
+                         [(0, 3, "bytes ed | a0 | 80")])
         self.assertEqual(check.bad_seqs(check.decode_line(b"a\xff\xfeb \xe2\x80")),
-                         [(1, 2, "byte ff"), (2, 3, "byte fe"), (5, 7, "bytes e2 80")])
+                         [(1, 3, "bytes ff | fe"), (5, 7, "bytes e2 80")])
+        self.assertEqual(check.bad_seqs(check.decode_line(b"\xe2\x80\xff")),
+                         [(0, 3, "bytes e2 80 | ff")])
         self.assertEqual(check.decode_line(b"a\xffb").encode("utf-8", "surrogateescape"), b"a\xffb")
 
     @unittest.skipUnless(shutil.which("git"), "git not installed")
@@ -2668,14 +2677,17 @@ class StrictBothReads(unittest.TestCase):
         spec = self.LUME_SPEC
         self.assertEqual(spec[:spec.index(b"\xe2\x80")].count(b"\n") + 1, 17)
         sha, p = self.cover(spec, self.LUME, self.LUME)
-        self.assertEqual(self.gaps(p)[:4], [
-            "  [UNREADABLE] D-001: DECISIONS.md line 3: D-001 followed by byte ff",
+        # ff|fe is one contiguous span: neighbour names the whole span once;
+        # fe is not its own gap (Kama, Lume #forge 2026-11-05).
+        self.assertEqual(self.gaps(p)[:3], [
+            "  [UNREADABLE] D-001: DECISIONS.md line 3: D-001 followed by bytes ff | fe",
             "  [UNREADABLE] SPEC line 17: bytes e2 80, not UTF-8, never replaced",
-            "  [UNREADABLE] DECISIONS.md line 3: byte fe, not UTF-8, never replaced",
             f"  [PIN READ DRIFT] pin quote: @a (event 8) read against {sha}: quoted, not closed "
             "there: D-001; unreadable at DECISIONS.md line 3"])
-        for name in ("byte ff", "byte fe", "bytes e2 80"):
+        for name in ("bytes ff | fe", "bytes e2 80"):
             self.assertEqual(p.stdout.count(name), 1, name)
+        self.assertNotIn("byte fe", p.stdout)
+        self.assertNotIn("byte ff,", p.stdout)
         # The rest of the §5 line is still read: D-002 is cited there and
         # in §1, and nothing else on it is a gap.
         self.assertNotIn("D-002", p.stdout)
@@ -2686,11 +2698,12 @@ class StrictBothReads(unittest.TestCase):
         # Pin commit differs from the tree: the pin read names ff on its
         # drift line and fe as its own gap, on the same line 3.
         sha, p = self.cover(self.S, self.D, self.LUME)
+        # Contiguous ff|fe: the neighbour on the drift line names the whole
+        # span; fe is not a second gap.
         self.assertEqual(self.gaps(p), [
             f"  [PIN READ DRIFT] pin quote: @a (event 8) read against {sha}: quoted, not closed "
-            "there: D-001; DECISIONS.md line 3: D-001 followed by byte ff, read as no D-number",
-            f"  [UNREADABLE] pin quote: @a (event 8) read against {sha}: DECISIONS.md line 3: "
-            "byte fe, not UTF-8, never replaced"])
+            "there: D-001; DECISIONS.md line 3: D-001 followed by bytes ff | fe, "
+            "read as no D-number"])
 
     @unittest.skipUnless(shutil.which("git"), "git not installed")
     def test_bytes_anywhere_named_rest_of_line_read(self):
@@ -2702,16 +2715,16 @@ class StrictBothReads(unittest.TestCase):
         dec = self.D.replace("· Process".encode(), "· Pro".encode() + b"\xff\xffcess").replace(
             b"- **Author:** A\n", b"- **Author:** A\xf0\x9f\x98\n", 1)
         sha, p = self.cover(spec, dec, self.D)
+        # Contiguous ff ff is one span "bytes ff | ff", not two byte-ff gaps.
         self.assertEqual(self.gaps(p), [
             "  [UNREADABLE] SPEC line 5: byte c3, not UTF-8, never replaced",
-            "  [UNREADABLE] DECISIONS.md line 3: byte ff, not UTF-8, never replaced",
-            "  [UNREADABLE] DECISIONS.md line 3: byte ff, not UTF-8, never replaced",
+            "  [UNREADABLE] DECISIONS.md line 3: bytes ff | ff, not UTF-8, never replaced",
             "  [UNREADABLE] DECISIONS.md line 6: bytes f0 9f 98, not UTF-8, never replaced"])
         self.assertEqual(p.returncode, 1)
         # The same file at the pin, tree clean: the pin read names them.
         sha, p = self.cover(self.S, self.D, dec)
         self.assertEqual(len([g for g in self.gaps(p) if g.startswith(
-            f"  [UNREADABLE] pin quote: @a (event 8) read against {sha}: DECISIONS.md line")]), 3)
+            f"  [UNREADABLE] pin quote: @a (event 8) read against {sha}: DECISIONS.md line")]), 2)
         self.assertIn("2 closed headings, equal to the quote", p.stdout)
 
     @unittest.skipUnless(shutil.which("git"), "git not installed")
@@ -2740,7 +2753,37 @@ class StrictBothReads(unittest.TestCase):
         self.assertIn("[UNPINNED] SPEC §0 cites no pin; Pin line: D-001 followed by byte ff", p.stdout)
         self.assertEqual(p.returncode, 1)
 
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_lume_contiguous_span_bars_no_d012_splice(self):
+        # Lume #forge 2026-11-05: heading D-0 + f0 9f 98 + 12, plus prose
+        # e2 80 ff. Contiguous spans: "bytes f0 9f 98" and "bytes e2 80 | ff".
+        # Bars from the decoder's start/end over the span's bytes. Without
+        # surrogateescape, errors=ignore would splice D-0 + 12 into D-012 and
+        # read it closed; that must never happen.
+        head = b"## D-0\xf0\x9f\x9812 \xc2\xb7"
+        dec = self.D.replace(self.HEAD, head)
+        self.assertEqual(dec[:dec.index(b"\xf0\x9f\x98")].count(b"\n") + 1, 3)
+        spec = self.S.replace(b"## 12. Open questions",
+                              b"## 5. Five\n\n- Five. A rule. (D-002 c) \xe2\x80\xff\n\n"
+                              b"## 12. Open questions")
+        self.assertEqual(spec[:spec.index(b"\xe2\x80\xff")].count(b"\n") + 1, 17)
+        sha, p = self.cover(spec, dec, dec)
+        unread = [g for g in self.gaps(p) if g.startswith("  [UNREADABLE]")]
+        self.assertEqual(unread, [
+            "  [UNREADABLE] SPEC line 17: bytes e2 80 | ff, not UTF-8, never replaced",
+            "  [UNREADABLE] DECISIONS.md line 3: bytes f0 9f 98, not UTF-8, never replaced"])
+        self.assertEqual(p.stdout.count("bytes f0 9f 98"), 1)
+        self.assertEqual(p.stdout.count("bytes e2 80 | ff"), 1)
+        self.assertNotIn("D-012", p.stdout)
+        self.assertIn("[PIN DRIFT] D-001:", p.stdout)  # heading no longer closes D-001
+        self.assertEqual(p.returncode, 1)
+        # The splice hazard: dropping the bad bytes would close D-012.
+        self.assertIn("## D-012 ·", head.decode("utf-8", "ignore"))
+        check = import_check()
+        self.assertNotIn("D-012", check.decode_line(head))
+
     def test_coverage_never_replaces(self):
+
         # No coverage read decodes with "replace" (comments aside).
         src = CHECK.read_text(encoding="utf-8")
         code = "\n".join(l.split("#")[0] for l in src.splitlines())
