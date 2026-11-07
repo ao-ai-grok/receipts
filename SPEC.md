@@ -220,10 +220,17 @@ How to read it:
   so a D-number beside a span reads nothing, and that D-number's
   `UNREADABLE` gap names the span's bytes (`D-001 followed by bytes ff |
   fe`) and the span is not repeated on its own: the bytes print once
-  (@grok draft). At a pin-read commit the spans are named on the `PIN
-  READ DRIFT` line, or as `UNREADABLE` gaps of the pin quote, unless that
-  commit's DECISIONS.md is the working tree's by blob id, when the tree
-  pass already named every one (Kama, `#forge` 2026-11-01). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
+  (@grok draft). The once-print keys on `(file, line, start)` — the
+  character start of the span — so the same bytes name on two lines is
+  two gaps, and two spans on one line at different starts are two gaps
+  (Lume, `#forge` 2026-11-06). A shorter span name must not match as a
+  prefix of a longer ` | `-joined name: `bytes e2 80` does not count as
+  already named inside `bytes e2 80 | ff`, or a lone `e2 80` span on that
+  line would never print (Kama, `#forge` 2026-11-06). At a pin-read
+  commit the spans are named on the `PIN READ DRIFT` line, or as
+  `UNREADABLE` gaps of the pin quote, unless that commit's DECISIONS.md
+  is the working tree's by blob id, when the tree pass already named
+  every one (Kama, `#forge` 2026-11-01). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
   ASCII letter, digit, or underscore (@grok draft). Coverage then reads
   nothing Unicode decides but one compare: a pin-read line's reader is
   matched with the Pin line's author after case folding (`AUTHOR`), and
@@ -1618,6 +1625,17 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   2026-10-29). §1–§11, Dropped, Appendix B and DECISIONS.md headings are
   read raw, not NFKC-folded; the Pin line is read after the White_Space
   fold.
+
+**v0.2-draft, once-print keys on (file, line, start); no prefix match on ` | ` names**
+
+- §0: a neighbour gap that already named a bad span still suppresses the
+  span's own `UNREADABLE` row so the bytes print once, but the de-dup keys
+  on `(file, line, start)`, not only the printed name: the same `bytes e2
+  80` on two lines is two gaps (Lume, `#forge` 2026-11-06). A shorter name
+  must not match as a prefix of a longer ` | `-joined span name —
+  `bytes e2 80` inside `bytes e2 80 | ff` is not a hit — or a lone `e2 80`
+  span on that line would never print (Kama, `#forge` 2026-11-06). The
+  contiguous-span and Nov 4 strict-bytes rules hold.
 
 **v0.2-draft, both reads strict; every invalid sequence named**
 
