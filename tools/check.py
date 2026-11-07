@@ -162,17 +162,19 @@
 # text; Lume #forge 2026-11-01) and the tree pass, printed first, already
 # printed that code point this run.
 #
-# Bytes (Kama, Lume #forge 2026-11-04 / 2026-11-05): both reads, the working
-# tree and DECISIONS.md at a pin-read commit, take bytes, split on LF, and
-# decode each line strictly. Each invalid sequence, bytes[start:end] of the
-# decoder's error, is named in hex and decoding resumes at its end. Contiguous
-# sequences are one UNREADABLE gap, naming every sequence in the span joined
-# with " | " (Kama #forge 2026-11-05), taking the bars from the decoder's
-# start and end over the span's bytes (Lume #forge 2026-11-05): e.g. ed a0 80
-# is "bytes ed | a0 | 80", and e2 80 ff is "bytes e2 80 | ff". Never replaced,
-# no U+FFFD, no traceback. The rest of the line is still read under
+# Bytes (Kama, Lume #forge 2026-11-04 / 2026-11-05 / 2026-11-06): both reads,
+# the working tree and DECISIONS.md at a pin-read commit, take bytes, split on
+# LF, and decode each line strictly. Each invalid sequence, bytes[start:end]
+# of the decoder's error, is named in hex and decoding resumes at its end.
+# Contiguous sequences are one UNREADABLE gap, naming every sequence in the
+# span joined with " | " (Kama #forge 2026-11-05), taking the bars from the
+# decoder's start and end over the span's bytes (Lume #forge 2026-11-05): e.g.
+# ed a0 80 is "bytes ed | a0 | 80", and e2 80 ff is "bytes e2 80 | ff". Never
+# replaced, no U+FFFD, no traceback. The rest of the line is still read under
 # surrogateescape, so a malformed D-number cannot splice into a valid one
 # (Kama); a D-number beside a span reads nothing and its gap names the bytes.
+# Once-print keys on (file, line, start) (Lume #forge 2026-11-06); a shorter
+# name must not match inside a longer " | "-joined name (Kama #forge 2026-11-06).
 #
 # Counted reads (Kama and Lume #forge cuts, 2026-10-07): event N is the
 # reader's own post. A line that cites no event of its own reads CLAIMED;
@@ -1009,22 +1011,48 @@ def byte_gaps(lines, where, named=()):
     """(place, text) UNREADABLE gaps, one per contiguous bad span on every
     line, by grep -n's line (SPEC §0; Kama, Lume #forge 2026-11-05). named:
     gap texts already printed; a span one of them names on that line (a
-    D-number's neighbour) is not repeated, so its bytes print once."""
+    D-number's neighbour) is not repeated, so its bytes print once. Dedup
+    keys on (file, line, start): the same bytes name on two lines, or at
+    two starts, is two gaps (Lume #forge 2026-11-06). A shorter name must
+    not match as a prefix of a longer " | "-joined name — lookahead also
+    refuses " | " — or a lone e2 80 beside bytes e2 80 | ff would never
+    print (Kama #forge 2026-11-06)."""
     out = []
+    blocks = lambda c: c != "" and (not c.isascii() or c.isalnum() or c == "_")
     for n, line in enumerate(lines, 1):
         seqs = bad_seqs(line)
         if not seqs:
             continue
         at = f"{where} line {n}"
         mine = [w for w in named if w.startswith((at + ":", at + " ("))]
-        said = {}
-        for _, _, name in seqs:
-            hit = re.compile("(?:followed by " + re.escape(name) + "|"
-                             + re.escape(name) + " before )(?![0-9a-f])", A)
-            said.setdefault(name, sum(len(hit.findall(w)) for w in mine))
-        for _, _, name in seqs:
-            if said[name] > 0:
-                said[name] -= 1
+        # Starts already named by a neighbour gap on this line. Match the
+        # printed name with Kama's lookahead, then record the character
+        # start from bad_seqs — never a bare name count, so two identical
+        # names at different starts cannot collapse (Lume).
+        covered = set()
+        for m in D_LOOSE.finditer(line):
+            before = line[m.start() - 1] if m.start() else ""
+            after = line[m.end()] if m.end() < len(line) else ""
+            ks = []
+            if blocks(before):
+                ks.append(m.start() - 1)
+            if blocks(after):
+                ks.append(m.end())
+            for k in ks:
+                if not ("\udc80" <= line[k] <= "\udcff"):
+                    continue
+                for i, j, name in seqs:
+                    if i <= k < j:
+                        hit = re.compile(
+                            r"(?:followed by " + re.escape(name) + r"|"
+                            + re.escape(name) + r" before )(?![0-9a-f]| \|)",
+                            A,
+                        )
+                        if any(hit.search(w) for w in mine):
+                            covered.add(i)
+                        break
+        for i, j, name in seqs:
+            if i in covered:
                 continue
             out.append((at, f"{name}, not UTF-8, never replaced"))
     return out
@@ -1357,7 +1385,8 @@ def coverage(spec: Path, decisions: Path, pinned=None):
     # Every contiguous bad span on every line of either file is its own
     # UNREADABLE gap with file, grep -n line and bytes in hex (sequences in
     # the span joined with " | "), unless it is a D-number's neighbour and
-    # that gap already named it (Kama, Lume #forge 2026-11-05).
+    # that gap already named it at that (file, line, start) (Kama, Lume
+    # #forge 2026-11-05 / 2026-11-06).
     for f, where in ((spec, "SPEC"), (decisions, "DECISIONS.md")):
         gaps += [("UNREADABLE", at, w)
                  for at, w in byte_gaps(lf_lines(read_raw(f)), where, printed)]

@@ -2585,7 +2585,9 @@ class StrictBothReads(unittest.TestCase):
     hex, resume at end. Kama, Lume #forge 2026-11-05: contiguous sequences
     are one gap, naming every sequence in the span joined with " | ", bars
     from the decoder's start and end over the span's bytes; surrogateescape
-    stays, so a malformed D-number cannot splice into a valid one."""
+    stays, so a malformed D-number cannot splice into a valid one.
+    Kama, Lume #forge 2026-11-06: once-print keys on (file, line, start);
+    a shorter name must not match inside a longer " | "-joined name."""
 
     def cover(self, spec, dec, at_pin):
         """Commit at_pin as DECISIONS.md (bytes), write spec and dec (bytes)
@@ -2644,6 +2646,18 @@ class StrictBothReads(unittest.TestCase):
         self.assertEqual(check.bad_seqs(check.decode_line(b"\xe2\x80\xff")),
                          [(0, 3, "bytes e2 80 | ff")])
         self.assertEqual(check.decode_line(b"a\xffb").encode("utf-8", "surrogateescape"), b"a\xffb")
+        # Kama #forge 2026-11-06: old lookahead (?![0-9a-f]) matched bytes e2 80
+        # inside bytes e2 80 | ff; also refuse " | ".
+        import re
+        name = "bytes e2 80"
+        hit = re.compile(
+            r"(?:followed by " + re.escape(name) + r"|"
+            + re.escape(name) + r" before )(?![0-9a-f]| \|)",
+            re.ASCII,
+        )
+        self.assertEqual(hit.findall("followed by bytes e2 80 | ff"), [])
+        self.assertEqual(hit.findall("followed by bytes e2 80"),
+                         ["followed by bytes e2 80"])
 
     @unittest.skipUnless(shutil.which("git"), "git not installed")
     def test_kama_pin_ff_in_heading_committed_and_in_tree(self):
@@ -2781,6 +2795,44 @@ class StrictBothReads(unittest.TestCase):
         self.assertIn("## D-012 ·", head.decode("utf-8", "ignore"))
         check = import_check()
         self.assertNotIn("D-012", check.decode_line(head))
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_lume_same_name_two_lines_two_gaps(self):
+        # Lume #forge 2026-11-06: e2 80 before a space on line 3 AND line 17
+        # of §5-ish prose, not beside a D-number. Dedup keys on
+        # (file, line, start), so the same bytes name is two UNREADABLE gaps.
+        spec = self.S.replace(b"## 0. About", b"## 0. About\xe2\x80 x").replace(
+            b"## 12. Open questions",
+            b"## 5. Five\n\n- Five. A rule. (D-002 c) \xe2\x80\n\n"
+            b"## 12. Open questions")
+        self.assertEqual(spec[:spec.index(b"\xe2\x80 x")].count(b"\n") + 1, 3)
+        self.assertEqual(spec[:spec.index(b") \xe2\x80")].count(b"\n") + 1, 17)
+        sha, p = self.cover(spec, self.D, self.D)
+        unread = [g for g in self.gaps(p) if g.startswith("  [UNREADABLE]")]
+        self.assertEqual(unread, [
+            "  [UNREADABLE] SPEC line 3: bytes e2 80, not UTF-8, never replaced",
+            "  [UNREADABLE] SPEC line 17: bytes e2 80, not UTF-8, never replaced"])
+        self.assertEqual(p.stdout.count("bytes e2 80"), 2)
+        self.assertEqual(p.returncode, 1)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_shorter_name_not_prefix_of_bar_join(self):
+        # Kama #forge 2026-11-06: neighbour names bytes e2 80 | ff; a lone
+        # bytes e2 80 later on the same line must still print. Old regex
+        # findalls inside the longer name and would suppress the lone span.
+        dec = self.D.replace(self.HEAD, b"## D-001\xe2\x80\xff \xc2\xb7 \xe2\x80 ")
+        sha, p = self.cover(self.S, dec, dec)
+        self.assertIn(
+            "[UNREADABLE] D-001: DECISIONS.md line 3: D-001 followed by bytes e2 80 | ff",
+            p.stdout)
+        self.assertIn(
+            "[UNREADABLE] DECISIONS.md line 3: bytes e2 80, not UTF-8, never replaced",
+            p.stdout)
+        self.assertEqual(p.stdout.count("bytes e2 80 | ff"), 1)
+        # Lone name appears once as its own gap text (the neighbour line also
+        # contains the letters, so count the gap form).
+        self.assertEqual(p.stdout.count("bytes e2 80, not UTF-8, never replaced"), 1)
+        self.assertEqual(p.returncode, 1)
 
     def test_coverage_never_replaces(self):
 
