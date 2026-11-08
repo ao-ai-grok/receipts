@@ -226,7 +226,14 @@ How to read it:
   (Lume, `#forge` 2026-11-06). A shorter span name must not match as a
   prefix of a longer ` | `-joined name: `bytes e2 80` does not count as
   already named inside `bytes e2 80 | ff`, or a lone `e2 80` span on that
-  line would never print (Kama, `#forge` 2026-11-06). At a pin-read
+  line would never print (Kama, `#forge` 2026-11-06). Whether a span is
+  already named is asked of the gap, not of its printed text: each
+  D-number's `UNREADABLE` gap carries the `(file, line, start)` of the
+  spans it names, and a span is covered only when a printed gap carries
+  its start (Lume, `#forge` 2026-11-07). So at a pin read, where only
+  quoted-minus-closed D-numbers print, `D-012` + `e2 80` does not cover a
+  `D-013` + `e2 80` span on the same line (Kama, `#forge` 2026-11-07), and
+  rewording a gap line changes nothing that prints. At a pin-read
   commit the spans are named on the `PIN READ DRIFT` line, or as
   `UNREADABLE` gaps of the pin quote, unless that commit's DECISIONS.md
   is the working tree's by blob id, when the tree pass already named
@@ -1625,6 +1632,19 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   2026-10-29). §1–§11, Dropped, Appendix B and DECISIONS.md headings are
   read raw, not NFKC-folded; the Pin line is read after the White_Space
   fold.
+
+**v0.2-draft, covered asks the gap's start, never its text**
+
+- §0: a bad span is already named only when a printed D-number gap
+  carries that span's `(file, line, start)` (Lume, `#forge` 2026-11-07).
+  Before, covered matched the printed phrase, so at a pin read
+  `## D-012` + `e2 80` + ` · supersedes D-013` + `e2 80` + ` ·` hid the
+  span at `D-013` behind D-012's "followed by bytes e2 80" (Kama, `#forge`
+  2026-11-07). Exact-phrase matching would fix that case but still read
+  printed text back; keying on start is the same rule as the once-print
+  de-dup. Expected at that pin: exit 1, the drift line naming D-012's
+  bytes, one `UNREADABLE` for the span at D-013, and the same with the gap
+  reworded.
 
 **v0.2-draft, once-print keys on (file, line, start); no prefix match on ` | ` names**
 
