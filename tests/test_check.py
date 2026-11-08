@@ -2834,6 +2834,51 @@ class StrictBothReads(unittest.TestCase):
         self.assertEqual(p.stdout.count("bytes e2 80, not UTF-8, never replaced"), 1)
         self.assertEqual(p.returncode, 1)
 
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_pin_covered_keys_on_start_not_text(self):
+        # Kama #forge 2026-11-07: at the pin, "## D-001" e2 80 " · supersedes
+        # D-002" e2 80 " ·". D-002 closes on its own heading, so only D-001's
+        # neighbour gap prints on the drift line. Old covered asked whether
+        # any gap on the line said "followed by bytes e2 80"; that also hid
+        # the span at D-002. Lume #forge 2026-11-07: covered keys on the
+        # span's start, like the de-dup, not on printed text.
+        tree = self.D
+        pin = self.D.replace(self.HEAD, b"## D-001\xe2\x80 \xc2\xb7 supersedes D-002\xe2\x80 \xc2\xb7")
+        self.assertEqual(pin[:pin.index(b"\xe2\x80")].count(b"\n") + 1, 3)
+        sha, p = self.cover(self.S, tree, pin)
+        g = self.gaps(p)
+        drift = [l for l in g if l.startswith("  [PIN READ DRIFT]")]
+        self.assertEqual(drift, [
+            f"  [PIN READ DRIFT] pin quote: @a (event 8) read against {sha}: quoted, not closed "
+            "there: D-001; DECISIONS.md line 3: D-001 followed by bytes e2 80, read as no D-number"])
+        self.assertEqual([l for l in g if l.startswith("  [UNREADABLE]")], [
+            f"  [UNREADABLE] pin quote: @a (event 8) read against {sha}: DECISIONS.md line 3: "
+            "bytes e2 80, not UTF-8, never replaced"])
+        self.assertEqual(p.returncode, 1)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_lume_covered_survives_reworded_gap_text(self):
+        # Lume #forge 2026-11-07: run the pin again with the neighbour
+        # wording changed; covered must give the same result, because it
+        # never reads printed text back.
+        check = import_check()
+        old = check.d_unread
+        def reworded(line):
+            return [(d, w.replace("followed by", "then")) for d, w in old(line)]
+        line = check.decode_line(b"## D-001\xe2\x80 \xc2\xb7 supersedes D-002\xe2\x80 \xc2\xb7")
+        for f in (old, reworded):
+            check.d_unread = f
+            try:
+                unread = {}
+                check.add_unread(unread, "DECISIONS.md line 3", line)
+                ws = unread["D-001"]
+                bad = check.byte_gaps([""] * 2 + [line], "DECISIONS.md", ws)
+            finally:
+                check.d_unread = old
+            self.assertEqual(bad, [("DECISIONS.md line 3", "bytes e2 80, not UTF-8, never replaced")],
+                             f.__name__)
+            self.assertTrue(any(w.startswith("DECISIONS.md line 3: D-001 ") for w in ws))
+
     def test_coverage_never_replaces(self):
 
         # No coverage read decodes with "replace" (comments aside).

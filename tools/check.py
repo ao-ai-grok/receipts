@@ -907,10 +907,41 @@ def d_unread(line):
     return out
 
 
+class Named(str):
+    """An unreadable-D-number gap text that also carries, as data, the
+    places of the bad spans it names: {(file-and-line, character start)}.
+    byte_gaps asks these, never the printed text, whether a span is already
+    named, so rewording a gap line cannot change what prints (Kama, Lume
+    #forge 2026-11-07)."""
+    spans = frozenset()
+
+
+def neighbour_starts(line, d):
+    """Character starts of the bad spans beside each blocked D-number d on
+    line: the spans d's UNREADABLE gap names."""
+    seqs = bad_seqs(line)
+    if not seqs:
+        return set()
+    blocks = lambda c: c != "" and (not c.isascii() or c.isalnum() or c == "_")
+    out = set()
+    for m in D_LOOSE.finditer(line):
+        if m.group() != d:
+            continue
+        before = line[m.start() - 1] if m.start() else ""
+        after = line[m.end()] if m.end() < len(line) else ""
+        for k in ([m.start() - 1] if blocks(before) else []) + ([m.end()] if blocks(after) else []):
+            out |= {i for i, j, _ in seqs if i <= k < j}
+    return out
+
+
 def add_unread(unread, where, line):
-    """Record line's unreadable D-numbers under unread[D] as "where: why"."""
+    """Record line's unreadable D-numbers under unread[D] as "where: why",
+    each a Named carrying the (place, start) of the bad spans it names."""
+    place = re.sub(r" \(.*\)$", "", where)
     for d, why in d_unread(line):
-        unread.setdefault(d, []).append(f"{where}: {why}, read as no D-number")
+        w = Named(f"{where}: {why}, read as no D-number")
+        w.spans = frozenset((place, i) for i in neighbour_starts(line, d))
+        unread.setdefault(d, []).append(w)
 
 
 CLOSED_HEAD = re.compile(r"## (D-[0-9]{3})" + D_AFTER + " ·", A)
@@ -1010,49 +1041,20 @@ def read_raw(path: Path):
 def byte_gaps(lines, where, named=()):
     """(place, text) UNREADABLE gaps, one per contiguous bad span on every
     line, by grep -n's line (SPEC §0; Kama, Lume #forge 2026-11-05). named:
-    gap texts already printed; a span one of them names on that line (a
-    D-number's neighbour) is not repeated, so its bytes print once. Dedup
-    keys on (file, line, start): the same bytes name on two lines, or at
-    two starts, is two gaps (Lume #forge 2026-11-06). A shorter name must
-    not match as a prefix of a longer " | "-joined name — lookahead also
-    refuses " | " — or a lone e2 80 beside bytes e2 80 | ff would never
-    print (Kama #forge 2026-11-06)."""
+    the D-number gaps already printed (Named, from add_unread). A span is
+    covered only when one of them carries its (file, line, start) as data
+    (Lume #forge 2026-11-07): covered never reads printed text back, so it
+    can't match another D-number's span with the same bytes on the line
+    (Kama #forge 2026-11-07), a shorter name inside a longer " | "-joined
+    one (Kama #forge 2026-11-06), or change when a gap is reworded. The
+    same bytes on two lines, or at two starts, is two gaps (Lume #forge
+    2026-11-06)."""
+    covered = set().union(*(getattr(w, "spans", ()) for w in named)) if named else set()
     out = []
-    blocks = lambda c: c != "" and (not c.isascii() or c.isalnum() or c == "_")
     for n, line in enumerate(lines, 1):
-        seqs = bad_seqs(line)
-        if not seqs:
-            continue
         at = f"{where} line {n}"
-        mine = [w for w in named if w.startswith((at + ":", at + " ("))]
-        # Starts already named by a neighbour gap on this line. Match the
-        # printed name with Kama's lookahead, then record the character
-        # start from bad_seqs — never a bare name count, so two identical
-        # names at different starts cannot collapse (Lume).
-        covered = set()
-        for m in D_LOOSE.finditer(line):
-            before = line[m.start() - 1] if m.start() else ""
-            after = line[m.end()] if m.end() < len(line) else ""
-            ks = []
-            if blocks(before):
-                ks.append(m.start() - 1)
-            if blocks(after):
-                ks.append(m.end())
-            for k in ks:
-                if not ("\udc80" <= line[k] <= "\udcff"):
-                    continue
-                for i, j, name in seqs:
-                    if i <= k < j:
-                        hit = re.compile(
-                            r"(?:followed by " + re.escape(name) + r"|"
-                            + re.escape(name) + r" before )(?![0-9a-f]| \|)",
-                            A,
-                        )
-                        if any(hit.search(w) for w in mine):
-                            covered.add(i)
-                        break
-        for i, j, name in seqs:
-            if i in covered:
+        for i, j, name in bad_seqs(line):
+            if (at, i) in covered:
                 continue
             out.append((at, f"{name}, not UTF-8, never replaced"))
     return out
@@ -1381,12 +1383,12 @@ def coverage(spec: Path, decisions: Path, pinned=None):
             for u in (heads_unread, spec_unread) for d in sorted(u) for w in u[d]]
     # Each line holding a code point str.splitlines breaks at is named, in
     # both files, everywhere, by grep -n's line (Lume #forge 2026-11-03).
-    printed = [g[2] for g in gaps]
+    printed = [w for u in (heads_unread, spec_unread) for d in u for w in u[d]]
     # Every contiguous bad span on every line of either file is its own
     # UNREADABLE gap with file, grep -n line and bytes in hex (sequences in
     # the span joined with " | "), unless it is a D-number's neighbour and
-    # that gap already named it at that (file, line, start) (Kama, Lume
-    # #forge 2026-11-05 / 2026-11-06).
+    # that gap carries that (file, line, start) as data (Kama, Lume
+    # #forge 2026-11-05 / 2026-11-06 / 2026-11-07).
     for f, where in ((spec, "SPEC"), (decisions, "DECISIONS.md")):
         gaps += [("UNREADABLE", at, w)
                  for at, w in byte_gaps(lf_lines(read_raw(f)), where, printed)]
