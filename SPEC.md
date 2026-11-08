@@ -233,7 +233,25 @@ How to read it:
   its start (Lume, `#forge` 2026-11-07). So at a pin read, where only
   quoted-minus-closed D-numbers print, `D-012` + `e2 80` does not cover a
   `D-013` + `e2 80` span on the same line (Kama, `#forge` 2026-11-07), and
-  rewording a gap line changes nothing that prints. At a pin-read
+  rewording a gap line changes nothing that prints. One rule for the
+  checker, not a fix per site: no test takes its input from a string the
+  checker printed; it takes the span or code point that produced the
+  string (Lume, `#forge` 2026-11-08). Each `UNREADABLE` gap carries, as
+  data, the code points it names on its line, the heading gap
+  (`U+000D in the heading after D-001`) too, and `LINE BREAK` asks
+  that, never whether `U+2028` sits inside a printed gap: code points
+  above U+FFFF print five digits, so `U+2028` is a substring of
+  `U+20280`, and every code point from U+20280 to U+2029F (32, all CJK
+  Ext B letters, Lo, so each blocks a D-number) holds `U+2028` or
+  `U+2029`. A heading `## D-012` + U+20280 + ` ·` with U+2028 later
+  on the line printed `D-012 followed by U+20280` and never the U+2028
+  (Kama, `#forge` 2026-11-08); now it is exit 1, the `UNREADABLE` gap
+  naming U+20280 and a `LINE BREAK` naming U+2028 on the same line. A
+  line holding U+2028 alone still prints exactly one `LINE BREAK` (Lume,
+  `#forge` 2026-11-08). The same holds for the place an "unreadable
+  at" suffix names, for whether a gap is under Appendix B, and for
+  whether a pin read's gap is one the tree pass printed: each is asked
+  of the gap's data. At a pin-read
   commit the spans are named on the `PIN READ DRIFT` line, or as
   `UNREADABLE` gaps of the pin quote, unless that commit's DECISIONS.md
   is the working tree's by blob id, when the tree pass already named
@@ -1632,6 +1650,20 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   2026-10-29). §1–§11, Dropped, Appendix B and DECISIONS.md headings are
   read raw, not NFKC-folded; the Pin line is read after the White_Space
   fold.
+
+**v0.2-draft, no test reads printed text back**
+
+- §0: `LINE BREAK` skipped a code point when its `U+XXXX` was a
+  substring of a printed gap on the line, and code points above U+FFFF
+  print five digits, so `D-012` + U+20280 hid a U+2028 later on the
+  heading (Kama, `#forge` 2026-11-08); U+20280..U+2029F, 32 code points,
+  all collide (Lume, `#forge` 2026-11-08). Now no checker test takes its
+  input from a string the checker printed; it takes the span or code
+  point that produced it, one rule for every site (Lume, `#forge`
+  2026-11-08). Each gap carries the code points it names as data, the
+  heading gap included. Expected at Kama's heading: exit 1, the
+  `UNREADABLE` naming U+20280, a `LINE BREAK` naming U+2028 on the same
+  line; U+2028 alone, exactly one `LINE BREAK`.
 
 **v0.2-draft, covered asks the gap's start, never its text**
 
