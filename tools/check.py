@@ -890,58 +890,94 @@ D_NUM = re.compile(D_BEFORE + r"D-[0-9]{3}" + D_AFTER, A)
 D_LOOSE = re.compile(r"D-[0-9]{3}", A)
 
 
-def d_unread(line):
-    """[(D-number, why)] for each D-NNN in line that reads nothing because of
-    the character beside it (SPEC §0; Lume #forge 2026-10-29). The character
-    is named by code point, not by Unicode name, so it stays version-free:
-    "D-035 followed by U+00A0", "U+FEFF before D-035"."""
+def _blocked_at(line):
+    """[(D-number, start, [k])] for each D-NNN in line that reads nothing
+    because of the character beside it: k is the index on line of each
+    blocking neighbour, before then after. d_unread's text is made from
+    this, and add_unread carries it as data (Lume #forge 2026-11-08)."""
     blocks = lambda c: c != "" and (not c.isascii() or c.isalnum() or c == "_")
     out = []
     for m in D_LOOSE.finditer(line):
         before = line[m.start() - 1] if m.start() else ""
         after = line[m.end()] if m.end() < len(line) else ""
-        why = ([f"{cp_at(line, m.start() - 1)} before {m.group()}"] if blocks(before) else []) + (
-            [f"{m.group()} followed by {cp_at(line, m.end())}"] if blocks(after) else [])
-        if why:
-            out.append((m.group(), " and ".join(why)))
+        ks = ([m.start() - 1] if blocks(before) else []) + ([m.end()] if blocks(after) else [])
+        if ks:
+            out.append((m.group(), m.start(), ks))
     return out
 
 
+def d_unread(line):
+    """[(D-number, why)] for each D-NNN in line that reads nothing because of
+    the character beside it (SPEC §0; Lume #forge 2026-10-29). The character
+    is named by code point, not by Unicode name, so it stays version-free:
+    "D-035 followed by U+00A0", "U+FEFF before D-035"."""
+    return [(d, " and ".join(f"{cp_at(line, k)} before {d}" if k < start
+                             else f"{d} followed by {cp_at(line, k)}" for k in ks))
+            for d, start, ks in _blocked_at(line)]
+
+
 class Named(str):
-    """An unreadable-D-number gap text that also carries, as data, the
-    places of the bad spans it names: {(file-and-line, character start)}.
-    byte_gaps asks these, never the printed text, whether a span is already
-    named, so rewording a gap line cannot change what prints (Kama, Lume
-    #forge 2026-11-07)."""
-    spans = frozenset()
+    """An unreadable-D-number gap text that also carries, as data, what it
+    names (SPEC §0): spans {(place, character start)} of the bad spans,
+    cps {(place, code point)} of the code points, place ("DECISIONS.md
+    line 3"), label (place, and "(Appendix B)" or "(Dropped)" when it
+    has one), section, d, kind ("neighbour" | "heading") and ks (indices
+    on the line of the characters named). No test takes its input from the
+    printed text; each takes these (Lume #forge 2026-11-08): byte_gaps asks
+    spans (Kama, Lume #forge 2026-11-07), line_breaks asks cps, so "U+2028"
+    inside a printed "U+20280" hides nothing (Kama #forge 2026-11-08), the
+    "unreadable at" suffix prints label, the Appendix B filter asks
+    section, and a pin read asks key whether the tree pass printed it."""
+    spans = cps = ks = frozenset()
+    place = label = section = d = None
+    kind = "neighbour"
+    row = None  # the UNREADABLE row's text, without ", read as no D-number"
+
+    @property
+    def key(self):
+        """What this gap names, as data: two gaps with one key name the same
+        code points and spans at the same place for the same D-number."""
+        return (self.place, self.d, self.kind, self.ks, self.cps, self.spans)
+
+    def as_row(self):
+        """The UNREADABLE row: same data, the row's text."""
+        return named_gap(self.row, self.row, self.place, self.label, self.section,
+                         self.d, self.kind, self.ks, self.spans, self.cps)
+
+
+def named_gap(text, row, place, label, section, d, kind, ks, spans, cps):
+    w = Named(text)
+    w.row, w.place, w.label, w.section, w.d, w.kind = row, place, label, section, d, kind
+    w.ks, w.spans, w.cps = frozenset(ks), frozenset(spans), frozenset(cps)
+    return w
 
 
 def neighbour_starts(line, d):
     """Character starts of the bad spans beside each blocked D-number d on
     line: the spans d's UNREADABLE gap names."""
     seqs = bad_seqs(line)
-    if not seqs:
-        return set()
-    blocks = lambda c: c != "" and (not c.isascii() or c.isalnum() or c == "_")
-    out = set()
-    for m in D_LOOSE.finditer(line):
-        if m.group() != d:
-            continue
-        before = line[m.start() - 1] if m.start() else ""
-        after = line[m.end()] if m.end() < len(line) else ""
-        for k in ([m.start() - 1] if blocks(before) else []) + ([m.end()] if blocks(after) else []):
-            out |= {i for i, j, _ in seqs if i <= k < j}
-    return out
+    return {i for dd, _, ks in _blocked_at(line) if dd == d
+            for k in ks for i, j, _ in seqs if i <= k < j}
 
 
-def add_unread(unread, where, line):
-    """Record line's unreadable D-numbers under unread[D] as "where: why",
-    each a Named carrying the (place, start) of the bad spans it names."""
-    place = re.sub(r" \(.*\)$", "", where)
-    for d, why in d_unread(line):
-        w = Named(f"{where}: {why}, read as no D-number")
-        w.spans = frozenset((place, i) for i in neighbour_starts(line, d))
-        unread.setdefault(d, []).append(w)
+def add_unread(unread, where, line, section=None):
+    """Record line's unreadable D-numbers under unread[D] as "label: why",
+    each a Named carrying, as data, the (place, start) of the bad spans and
+    the (place, code point) of the code points it names (Lume #forge
+    2026-11-08). where is the place, "SPEC line 40"; section, when given,
+    is printed after it, "SPEC line 40 (Appendix B)", and kept as data,
+    never parsed back out of the label."""
+    label = f"{where} ({section})" if section else where
+    blocked = _blocked_at(line)
+    whys = d_unread(line)
+    assert [d for d, _, _ in blocked] == [d for d, _ in whys]
+    seqs = bad_seqs(line)
+    for (d, _, ks), (_, why) in zip(blocked, whys):
+        spans = {(where, i) for k in ks for i, j, _ in seqs if i <= k < j}
+        cps = {(where, ord(line[k])) for k in ks if not "\udc80" <= line[k] <= "\udcff"}
+        unread.setdefault(d, []).append(named_gap(
+            f"{label}: {why}, read as no D-number", f"{label}: {why}",
+            where, label, section, d, "neighbour", ks, spans, cps))
 
 
 CLOSED_HEAD = re.compile(r"## (D-[0-9]{3})" + D_AFTER + " ·", A)
@@ -1086,14 +1122,18 @@ BREAKS = "\x0b\x0c\r\x1c\x1d\x1e\x85\u2028\u2029"
 def line_breaks(lines, where, named=()):
     """(place, text) LINE BREAK gaps, one per line holding any of BREAKS, each code
     point once per line, by grep -n's line (SPEC §0; Lume #forge
-    2026-11-03). named: UNREADABLE texts already printed; a code point one
-    of them names on that line is not repeated (the code point prints once)."""
+    2026-11-03). named: the UNREADABLE gaps already printed (Named); a code
+    point one of them carries, as data, at that (file, line) is not repeated
+    (the code point prints once). Never a substring test on printed text:
+    "U+2028" sits inside "U+20280" (Kama #forge 2026-11-08), and no test
+    takes its input from a string the checker printed (Lume #forge
+    2026-11-08)."""
+    covered = set().union(*(getattr(w, "cps", ()) for w in named)) if named else set()
     out = []
     for n, line in enumerate(lines, 1):
         at = f"{where} line {n}"
-        mine = [w for w in named if w == at or w.startswith((at + ":", at + " ("))]
-        cps = [f"U+{ord(c):04X}" for c in dict.fromkeys(c for c in line if c in BREAKS)]
-        cps = [cp for cp in cps if not any(cp in w for w in mine)]
+        cps = [f"U+{ord(c):04X}" for c in dict.fromkeys(c for c in line if c in BREAKS)
+               if (at, ord(c)) not in covered]
         if cps:
             out.append((at, f"{', '.join(cps)}, a line break to str.splitlines, not to grep -n"))
     return out
@@ -1118,18 +1158,22 @@ def closed_decisions(text, unread=None):
                 if m and not CLOSED_HEAD.match(line) and not d_unread(line):
                     # Only the ones inside "## D-0NN ·" are why; one after
                     # " ·" is left to LINE BREAK.
+                    # The gap carries the code points it names as data,
+                    # like the neighbour gap (Kama, Lume #forge 2026-11-08).
                     head, kept = [], 0
-                    for c in line:
+                    for k, c in enumerate(line):
                         if kept == m.end():
                             break
                         if c in BREAKS:
-                            head.append(c)
+                            head.append(k)
                         else:
                             kept += 1
-                    cps = ", ".join(f"U+{ord(c):04X}" for c in dict.fromkeys(head))
-                    unread.setdefault(m.group(1), []).append(
-                        f"DECISIONS.md line {n}: {cps} in the heading after {m.group(1)}, "
-                        "read as no D-number")
+                    place = f"DECISIONS.md line {n}"
+                    cps = ", ".join(f"U+{ord(c):04X}" for c in dict.fromkeys(line[k] for k in head))
+                    row = f"{place}: {cps} in the heading after {m.group(1)}"
+                    unread.setdefault(m.group(1), []).append(named_gap(
+                        row + ", read as no D-number", row, place, place, None, m.group(1),
+                        "heading", head, (), {(place, ord(line[k])) for k in head}))
     for sec in re.split(r"(?m)^## ", text):
         m = re.match(r"(D-[0-9]{3})" + D_AFTER + " ·", sec, A)
         if not m:
@@ -1166,13 +1210,13 @@ def spec_folds(text, unread=None):
             if m:
                 dropped.add(m.group(1))
             elif line.startswith("- "):
-                add_unread(unread, f"SPEC line {n} (Dropped)", line)
+                add_unread(unread, f"SPEC line {n}", line, "Dropped")
         elif section == "sources":
             m = re.match(r"- \*\*(D-[0-9]{3})\*\* — (.*)$", line, A)
             if m:
                 sources[m.group(1)] = fold_ws(m.group(2))
             elif line.startswith("- "):
-                add_unread(unread, f"SPEC line {n} (Appendix B)", line)
+                add_unread(unread, f"SPEC line {n}", line, "Appendix B")
     return cited, dropped, sources
 
 
@@ -1295,7 +1339,9 @@ def same_blob(decisions: Path, commit):
 
 def pin_read_gaps(spec_text, decisions: Path, pin, quoted, tree_printed=frozenset()):
     """Gaps and notes for the SPEC §0 pin-read lines naming this pin.
-    tree_printed: the UNREADABLE gap texts the tree pass printed this run."""
+    tree_printed: the keys (Named.key) of the UNREADABLE gaps the tree pass
+    printed this run: what they name, as data, never their text (Lume
+    #forge 2026-11-08)."""
     author = spec_pin_author(spec_text)
     reads = [r + (read_kind(r, pin, author),) for r in spec_pin_reads(spec_text) if r[3] == pin]
     gaps, notes, out = [], [], []
@@ -1324,9 +1370,8 @@ def pin_read_gaps(spec_text, decisions: Path, pin, quoted, tree_printed=frozense
             # code point this run (Kama #forge 2026-11-01).
             ws = [w for d in sorted(quoted - heads) for w in unread.get(d, [])]
             same = same_blob(decisions, commit)
-            if ws and same and all(
-                    w.replace(", read as no D-number", "") in tree_printed for w in ws):
-                why = "; unreadable at " + ", ".join(w.split(": ", 1)[0] for w in ws)
+            if ws and same and all(getattr(w, "key", None) in tree_printed for w in ws):
+                why = "; unreadable at " + ", ".join(w.label for w in ws)
             else:
                 why = "".join(f"; {w}" for w in ws)
             diff = "; ".join(s for s in (
@@ -1371,15 +1416,17 @@ def coverage(spec: Path, decisions: Path, pinned=None):
     # names only the place; the UNREADABLE gap alone carries the code point,
     # so one cause prints once (Kama #forge 2026-10-31). Every place is named,
     # not the first, so one run shows the whole repair (Lume #forge 2026-10-31).
-    def named(u, d, kinds=None, skip=()):
-        at = [w.split(": ", 1)[0] for w in u.get(d, [])
-              if (kinds is None or any(k in w for k in kinds)) and not any(k in w for k in skip)]
+    # The place and the section are the gap's data, never parsed out of its
+    # printed text (Lume #forge 2026-11-08).
+    def named(u, d, section=None, skip=()):
+        at = [w.label for w in u.get(d, [])
+              if (section is None or w.section == section) and w.section not in skip]
         return "; unreadable at " + ", ".join(at) if at else ""
     # Every D-number that reads nothing because of its neighbour is its own
     # gap, kind UNREADABLE, with line and code point (Kama, Lume #forge
     # 2026-10-30): "- D-035"+U+00A0 under Dropped with D-035 cited cleanly in
     # §5 would otherwise pass, and BOTH would never fire.
-    gaps = [("UNREADABLE", d, w.replace(", read as no D-number", ""))
+    gaps = [("UNREADABLE", d, w.as_row())
             for u in (heads_unread, spec_unread) for d in sorted(u) for w in u[d]]
     # Each line holding a code point str.splitlines breaks at is named, in
     # both files, everywhere, by grep -n's line (Lume #forge 2026-11-03).
@@ -1392,7 +1439,8 @@ def coverage(spec: Path, decisions: Path, pinned=None):
     for f, where in ((spec, "SPEC"), (decisions, "DECISIONS.md")):
         gaps += [("UNREADABLE", at, w)
                  for at, w in byte_gaps(lf_lines(read_raw(f)), where, printed)]
-    printed = [g[2] for g in gaps]
+    # LINE BREAK asks the code points each D-number gap carries (Kama, Lume
+    # #forge 2026-11-08); a bytes gap names no code point.
     for f, where in ((spec, "SPEC"), (decisions, "DECISIONS.md")):
         gaps += [("LINE BREAK", at, w)
                  for at, w in line_breaks(lf_lines(read_raw(f)), where, printed)]
@@ -1414,22 +1462,23 @@ def coverage(spec: Path, decisions: Path, pinned=None):
             gaps.append(("BOTH", d, f"listed as dropped and also cited (SPEC line {cited[d]})"))
         if d not in sources:
             gaps.append(("NO SOURCE", d, "no Appendix B fold-source line"
-                         + named(spec_unread, d, ("Appendix B",))))
+                         + named(spec_unread, d, "Appendix B")))
         elif closed[d] is None:
             gaps.append(("NO SOURCE", d, "DECISIONS.md entry has no **Source:** line"))
         elif sources[d] != closed[d]:
             gaps.append(("SOURCE DRIFT", d, "Appendix B line differs from the DECISIONS.md **Source:** line"))
-    for d in sorted(set(cited) - set(closed)):
+    # Closed after the pin: reported once, as AHEAD OF PIN, so no NOT CLOSED
+    # row is made for it (decided on the D-number, not on a printed row).
+    ahead = set(all_closed) if pinned is not None else set()
+    for d in sorted(set(cited) - set(closed) - ahead):
         gaps.append(("NOT CLOSED", d, f"cited in SPEC line {cited[d]}; not closed in DECISIONS.md"
                      + named(heads_unread, d)))
-    for d in sorted(dropped - set(closed)):
+    for d in sorted(dropped - set(closed) - ahead):
         gaps.append(("NOT CLOSED", d, "listed as dropped; not closed in DECISIONS.md"
                      + named(heads_unread, d)))
-    for d in sorted(set(sources) - set(closed)):
+    for d in sorted(set(sources) - set(closed) - ahead):
         gaps.append(("NOT CLOSED", d, "has an Appendix B source; not closed in DECISIONS.md"
                      + named(heads_unread, d)))
-    if pinned is not None:  # closed after the pin: reported once, as AHEAD OF PIN
-        gaps = [g for g in gaps if not (g[0] == "NOT CLOSED" and g[1] in all_closed)]
     return closed, cited, dropped, gaps
 
 
@@ -1457,11 +1506,14 @@ def coverage_main(spec: Path, decisions: Path, pin=None):
     # The tree pass runs first, so its UNREADABLE gaps are printed before any
     # pin-read line that leans on them (Kama #forge 2026-11-01).
     closed, cited, dropped, gaps = coverage(spec, decisions, cited_pin[1])
-    tree_unread = [g for g in gaps if g[0] in ("UNREADABLE", "LINE BREAK")]
-    gaps = [g for g in gaps if g not in tree_unread]
+    tree = [g[0] in ("UNREADABLE", "LINE BREAK") for g in gaps]
+    tree_unread = [g for g, t in zip(gaps, tree) if t]
+    gaps = [g for g, t in zip(gaps, tree) if not t]
+    # What the tree pass printed, as data (Named.key), never its text
+    # (Lume #forge 2026-11-08).
     reads, read_gaps, read_notes = pin_read_gaps(spec_text,
                                                  decisions, pin, cited_pin[1],
-                                                 {g[2] for g in tree_unread})
+                                                 {g[2].key for g in tree_unread if isinstance(g[2], Named)})
     kinds = [r[-1] for r in reads]
     counted = [r[1] for r in reads if r[-1] == COUNTED]
     print(f"  pin reads naming event {pin}: {len(counted)} counted"

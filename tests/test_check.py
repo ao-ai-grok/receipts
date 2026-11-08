@@ -2333,8 +2333,15 @@ class PinReadCodePointOnce(unittest.TestCase):
                                  capture_output=True, text=True).stdout.strip()
             spec = SPEC.replace("abc1234", sha)
             self.assertTrue(check.same_blob(path, sha))
-            printed = {"DECISIONS.md line 3: U+200B before D-001"}
+            # The tree pass's gaps as data (Named.key), never their text
+            # (Lume #forge 2026-11-08): the printed text alone counts for
+            # nothing.
+            unread = {}
+            check.closed_decisions(check.read_raw(path), unread)
+            printed = {w.key for ws in unread.values() for w in ws}
+            text = {"DECISIONS.md line 3: U+200B before D-001"}
             for tree_printed, want in ((frozenset(), "U+200B before D-001, read as no D-number"),
+                                       (text, "U+200B before D-001, read as no D-number"),
                                        (printed, "; unreadable at DECISIONS.md line 3")):
                 gaps = check.pin_read_gaps(spec, path, "7", {"D-001", "D-002"}, tree_printed)[1]
                 self.assertTrue(gaps[0][2].endswith(want), gaps)
@@ -2887,6 +2894,128 @@ class StrictBothReads(unittest.TestCase):
         body = code[code.index("def bad_runs"):code.index("def human_dispute")]
         self.assertNotIn('"utf-8", "replace"', body)
         self.assertNotIn("errors=", body)
+
+
+
+class NoPrintedTextReadBack(unittest.TestCase):
+    """Kama #forge 2026-11-08: line_breaks asked "cp in w", a substring test
+    on printed text. Code points above U+FFFF print five digits, so "U+2028"
+    sits inside "U+20280" (CJK Ext B, Lo, so it blocks a D-number): a heading
+    "## D-001" + U+20280 + " ·" with U+2028 later printed "D-001 followed by
+    U+20280" and the U+2028 never printed. Lume #forge 2026-11-08: all 32 of
+    U+20280..U+2029F collide; one rule, no test takes its input from a
+    string the checker printed, it takes the span or code point that
+    produced it. Each gap carries the code points it names as data, the
+    "in the heading after" gap included."""
+
+    S, D = SPEC.encode(), DECISIONS.encode()
+    HEAD = "## D-001 · 2026-08-07 · Process".encode()
+    LB = "a line break to str.splitlines, not to grep -n"
+
+    def run_head(self, head):
+        dec = self.D.replace(self.HEAD, head.encode("utf-8"))
+        self.assertEqual(dec[:dec.index(head.encode("utf-8"))].count(b"\n") + 1, 3)
+        sha, p = StrictBothReads.cover(self, self.S, dec, dec)
+        return [l for l in p.stdout.splitlines() if l.startswith("  [")], p
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_pin_u20280_does_not_hide_u2028(self):
+        g, p = self.run_head("## D-001\U00020280 · 2026-08-07 \u2028 Process")
+        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: D-001 followed by U+20280", g)
+        self.assertIn(f"  [LINE BREAK] DECISIONS.md line 3: U+2028, {self.LB}", g)
+        self.assertEqual(p.returncode, 1)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_u20290_does_not_hide_u2029(self):
+        g, p = self.run_head("## D-001\U00020290 · 2026-08-07 \u2029 Process")
+        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: D-001 followed by U+20290", g)
+        self.assertIn(f"  [LINE BREAK] DECISIONS.md line 3: U+2029, {self.LB}", g)
+        self.assertEqual(p.returncode, 1)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_u2029f_beside_u2029(self):
+        # Lume: the other end of the range, right beside the break.
+        g, p = self.run_head("## D-001\U0002029F\u2029 · 2026-08-07 · Process")
+        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: D-001 followed by U+2029F", g)
+        self.assertIn(f"  [LINE BREAK] DECISIONS.md line 3: U+2029, {self.LB}", g)
+        self.assertEqual(p.returncode, 1)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_u2028_alone_exactly_one_line_break(self):
+        # Lume: the reverse, so the fix can't silence the real case.
+        g, p = self.run_head("## D-001 · 2026-08-07 \u2028 Process")
+        self.assertEqual(g, [f"  [LINE BREAK] DECISIONS.md line 3: U+2028, {self.LB}"])
+        self.assertEqual(p.stdout.count("U+2028"), 1)
+        self.assertEqual(p.returncode, 1)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_break_that_is_the_neighbour_prints_once(self):
+        # The data still de-dups the real case: U+2028 just after D-001 is
+        # the neighbour gap, and LINE BREAK does not repeat it.
+        g, p = self.run_head("## D-001\u2028 · 2026-08-07 · Process")
+        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: D-001 followed by U+2028", g)
+        self.assertNotIn("[LINE BREAK]", p.stdout)
+        self.assertEqual(p.stdout.count("U+2028"), 1)
+
+    def test_sweep_all_32_colliding_code_points(self):
+        # U+20280..U+2029F, each beside D-001, each with U+2028 and U+2029
+        # later on the line: both breaks print; with "U+%04X" every one of
+        # them holds "U+2028" or "U+2029" as a substring.
+        check = import_check()
+        for cp in range(0x20280, 0x202A0):
+            with self.subTest(cp=f"U+{cp:04X}"):
+                self.assertTrue(f"U+{cp:04X}".startswith(("U+2028", "U+2029")))
+                self.assertTrue(unicodedata.category(chr(cp)) == "Lo")
+                line = f"## D-001{chr(cp)} · x \u2028 y \u2029"
+                unread = {}
+                check.closed_decisions("# D\n\n" + line + "\n", unread)
+                self.assertEqual(unread["D-001"], [f"DECISIONS.md line 3: D-001 followed by U+{cp:04X}, "
+                                                   "read as no D-number"])
+                self.assertEqual(unread["D-001"][0].cps, {("DECISIONS.md line 3", cp)})
+                self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", unread["D-001"]),
+                                 [("DECISIONS.md line 3", f"U+2028, U+2029, {self.LB}")])
+
+    def test_heading_gap_carries_its_code_points(self):
+        # closed_decisions' "in the heading after" gap is data too: it
+        # carries U+2028, so LINE BREAK skips that one and names U+2029.
+        check = import_check()
+        line = "## D-001 \u2028· x \u2029"
+        unread = {}
+        check.closed_decisions("# D\n\n" + line + "\n", unread)
+        w, = unread["D-001"]
+        self.assertEqual(w, "DECISIONS.md line 3: U+2028 in the heading after D-001, read as no D-number")
+        self.assertEqual((w.kind, w.cps), ("heading", {("DECISIONS.md line 3", 0x2028)}))
+        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]),
+                         [("DECISIONS.md line 3", f"U+2029, {self.LB}")])
+
+    def test_printed_text_counts_for_nothing(self):
+        # Lume's rule as a rerun: reword every gap (text claims every code
+        # point) and nothing changes; a plain string naming U+2028 covers
+        # nothing; data alone covers.
+        check = import_check()
+        line = "## D-001\U00020280 · x \u2028"
+        unread = {}
+        check.closed_decisions("# D\n\n" + line + "\n", unread)
+        w, = unread["D-001"]
+        loud = check.named_gap("U+2028 U+2029 U+20280", "U+2028", w.place, w.label, w.section,
+                               w.d, w.kind, w.ks, w.spans, w.cps)
+        want = [("DECISIONS.md line 3", f"U+2028, {self.LB}")]
+        for named in ([w], [loud], ["DECISIONS.md line 3: U+2028"], [w.as_row()]):
+            self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", named), want)
+        self.assertEqual(w.as_row().key, w.key)
+        cover = check.named_gap("", "", w.place, w.label, w.section, w.d, w.kind, w.ks, w.spans,
+                                {(w.place, 0x2028)})
+        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [cover]), [])
+
+    def test_no_printed_text_read_back_in_coverage(self):
+        # The patterns removed by this cut stay removed (comments aside).
+        src = CHECK.read_text(encoding="utf-8")
+        code = "\n".join(l.split("#")[0] for l in src.splitlines())
+        body = code[code.index("def neighbour_starts"):code.index("def human_dispute")]
+        for pat in ("cp in w", 'w.split(": "', "k in w", '.replace(", read as no D-number"',
+                    "g not in tree_unread", 'g[1] in all_closed',
+                    're.sub(r" \\(.*\\)$"'):
+            self.assertNotIn(pat, body)
 
 
 if __name__ == "__main__":
