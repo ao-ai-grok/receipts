@@ -177,9 +177,10 @@ How to read it:
   line past `grep -n`'s. Those nine (U+000D other than the one trailing
   CR) are never a line break here, and none sits silently inside a line:
   every line in either file that holds one is a `LINE BREAK` gap naming
-  file, `grep -n` line and code point, each code point once per line:
-  `SPEC line 5: U+2029, a line break to str.splitlines, not to grep -n`
-  (Lume, `#forge` 2026-11-03). Everywhere, not only beside a D-number:
+  file, `grep -n` line and code point, one gap per line naming each
+  break by index (since 2026-11-09, below): `SPEC line 5: U+2029 at code
+  point 12, a line break to str.splitlines, not to grep -n` (Lume,
+  `#forge` 2026-11-03). Everywhere, not only beside a D-number:
   after the LF split the checker's numbering is right, but editors and
   other readers still break there, so "SPEC line 412" means one line to
   everyone only when none is left (@grok draft). Every line, not only
@@ -248,7 +249,29 @@ How to read it:
   (Kama, `#forge` 2026-11-08); now it is exit 1, the `UNREADABLE` gap
   naming U+20280 and a `LINE BREAK` naming U+2028 on the same line. A
   line holding U+2028 alone still prints exactly one `LINE BREAK` (Lume,
-  `#forge` 2026-11-08). The same holds for the place an "unreadable
+  `#forge` 2026-11-08). `LINE BREAK` covers by `(place, index)`, not by
+  code point: a gap covers the breaks at the indices it names, never
+  every break with that code point on its line. `## D-012` + U+2028 +
+  ` · supersedes x` + U+2028 + `y` printed the neighbour gap for the
+  U+2028 at index 8 and nothing for the one at 24, which showed only
+  once the heading was fixed and the checker rerun (Kama, `#forge`
+  2026-11-09); now it is exit 1, the neighbour gap, and one `LINE BREAK`
+  naming U+2028 at 24. The unit, named once here: an index is a
+  code-point index, from 0, into the same str the checker splits, the
+  LF-split line decoded strictly with its one trailing CR dropped; a
+  span's start, a gap's indices and `LINE BREAK` all count it (Lume,
+  `#forge` 2026-11-09). Not UTF-16 code units, not bytes. In Kama's
+  heading all before index 8 is ASCII, so the three units agree there
+  and that pin can't tell them apart; `## D-012 · supersedes ` +
+  U+20280 + `D-013` + U+2028 + `y` + U+2028 + `z` puts the named break
+  at code point 28 (UTF-16 29, byte 32) and the other at 30 (31, 36):
+  exit 1, D-013's neighbour gap, one `LINE BREAK` naming U+2028 at 30,
+  nothing at 28. `LINE BREAK` names each break it prints by index
+  (`U+2028 at code point 30`), so a break counted in the wrong unit
+  prints where a reader sees it (@grok draft). Lume's heading as posted
+  (`supersedes ` + U+20280 + U+2028 + `y` + U+2028 + `z`, breaks at 23
+  and 25) has no D-number beside a break: D-012 closes, no gap names
+  either break, and both print. The same holds for the place an "unreadable
   at" suffix names, for whether a gap is under Appendix B, and for
   whether a pin read's gap is one the tree pass printed: each is asked
   of the gap's data. At a pin-read
@@ -1650,6 +1673,18 @@ folds it into §11.9 and adds the fold-source and coverage conventions from
   2026-10-29). §1–§11, Dropped, Appendix B and DECISIONS.md headings are
   read raw, not NFKC-folded; the Pin line is read after the White_Space
   fold.
+
+**v0.2-draft, LINE BREAK covers by (place, index)**
+
+- §0: `LINE BREAK` skipped every break on a line whose code point a gap
+  carried, so `## D-012` + U+2028 + ` · supersedes x` + U+2028 + `y`
+  named the U+2028 at 8 and hid the one at 24 (Kama, `#forge`
+  2026-11-09). Now a gap covers only the indices it names. The unit is
+  named once: code-point index, from 0, into the LF-split, strictly
+  decoded line the checker splits, for spans and `LINE BREAK` alike; a
+  pin with a non-ASCII character ahead of the named break tells it
+  from UTF-16 and bytes (Lume, `#forge` 2026-11-09). Each printed break
+  is named with its index.
 
 **v0.2-draft, no test reads printed text back**
 
