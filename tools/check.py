@@ -924,8 +924,11 @@ class Named(str):
     has one), section, d, kind ("neighbour" | "heading") and ks (indices
     on the line of the characters named). No test takes its input from the
     printed text; each takes these (Lume #forge 2026-11-08): byte_gaps asks
-    spans (Kama, Lume #forge 2026-11-07), line_breaks asks cps, so "U+2028"
-    inside a printed "U+20280" hides nothing (Kama #forge 2026-11-08), the
+    spans (Kama, Lume #forge 2026-11-07), line_breaks asks (place, k) for
+    k in ks, never cps or text, so "U+2028" inside a printed "U+20280"
+    hides nothing (Kama #forge 2026-11-08) and a gap naming one U+2028
+    covers no other on its line (Kama #forge 2026-11-09). ks and spans
+    are code-point indices into the line's str (Lume #forge 2026-11-09). The
     "unreadable at" suffix prints label, the Appendix B filter asks
     section, and a pin read asks key whether the tree pass printed it."""
     spans = cps = ks = frozenset()
@@ -1119,23 +1122,35 @@ def lf_text(path: Path):
 BREAKS = "\x0b\x0c\r\x1c\x1d\x1e\x85\u2028\u2029"
 
 
+def break_indices(line):
+    """[(k, c)] for each of BREAKS in line, k its index (SPEC §0, the one
+    unit; Lume #forge 2026-11-09): a code-point index, from 0, into line,
+    the LF-split, strictly decoded str the checker splits, the same str
+    whose indices _blocked_at and bad_seqs give a gap's ks and spans. Not
+    UTF-16 code units, not bytes."""
+    return [(k, c) for k, c in enumerate(line) if c in BREAKS]
+
+
 def line_breaks(lines, where, named=()):
-    """(place, text) LINE BREAK gaps, one per line holding any of BREAKS, each code
-    point once per line, by grep -n's line (SPEC §0; Lume #forge
-    2026-11-03). named: the UNREADABLE gaps already printed (Named); a code
-    point one of them carries, as data, at that (file, line) is not repeated
-    (the code point prints once). Never a substring test on printed text:
+    """(place, text) LINE BREAK gaps, one per line holding any of BREAKS,
+    naming each break by code point and index, by grep -n's line (SPEC §0;
+    Lume #forge 2026-11-03). named: the UNREADABLE gaps already printed
+    (Named). A break is covered by (place, index), never by code point
+    (Kama #forge 2026-11-09): a gap covers only the indices it carries as
+    ks, so a gap naming the U+2028 at 8 does not hide the U+2028 at 24 on
+    the same line. Indices are break_indices', the unit spans and ks use
+    (Lume #forge 2026-11-09). Never a substring test on printed text:
     "U+2028" sits inside "U+20280" (Kama #forge 2026-11-08), and no test
     takes its input from a string the checker printed (Lume #forge
     2026-11-08)."""
-    covered = set().union(*(getattr(w, "cps", ()) for w in named)) if named else set()
+    covered = {(w.place, k) for w in named for k in getattr(w, "ks", ())}
     out = []
     for n, line in enumerate(lines, 1):
         at = f"{where} line {n}"
-        cps = [f"U+{ord(c):04X}" for c in dict.fromkeys(c for c in line if c in BREAKS)
-               if (at, ord(c)) not in covered]
-        if cps:
-            out.append((at, f"{', '.join(cps)}, a line break to str.splitlines, not to grep -n"))
+        named_here = [f"U+{ord(c):04X} at code point {k}" for k, c in break_indices(line)
+                      if (at, k) not in covered]
+        if named_here:
+            out.append((at, f"{', '.join(named_here)}, a line break to str.splitlines, not to grep -n"))
     return out
 
 
@@ -1439,8 +1454,9 @@ def coverage(spec: Path, decisions: Path, pinned=None):
     for f, where in ((spec, "SPEC"), (decisions, "DECISIONS.md")):
         gaps += [("UNREADABLE", at, w)
                  for at, w in byte_gaps(lf_lines(read_raw(f)), where, printed)]
-    # LINE BREAK asks the code points each D-number gap carries (Kama, Lume
-    # #forge 2026-11-08); a bytes gap names no code point.
+    # LINE BREAK asks the (place, index) each D-number gap carries as ks,
+    # not its code points (Kama #forge 2026-11-09; data, not text: Kama, Lume
+    # #forge 2026-11-08); a bytes gap names no break.
     for f, where in ((spec, "SPEC"), (decisions, "DECISIONS.md")):
         gaps += [("LINE BREAK", at, w)
                  for at, w in line_breaks(lf_lines(read_raw(f)), where, printed)]
