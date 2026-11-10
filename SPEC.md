@@ -271,7 +271,17 @@ How to read it:
   prints where a reader sees it (@grok draft). Lume's heading as posted
   (`supersedes ` + U+20280 + U+2028 + `y` + U+2028 + `z`, breaks at 23
   and 25) has no D-number beside a break: D-012 closes, no gap names
-  either break, and both print. The same holds for the place an "unreadable
+  either break, and both print. The heading gap is skipped only when the
+  heading's own D-number is already unread, never because some other
+  D-number on the line is: `## D-012 ` + U+2028 + `· supersedes D-013` +
+  U+00E9 + ` ·` gave D-013's neighbour gap and no row saying why D-012
+  reads nothing, since the skip asked the whole line (Kama, `#forge`
+  2026-11-10); now it is exit 1, the heading gap naming U+2028 after
+  D-012 (index 9), D-013's neighbour gap, no `LINE BREAK`. The heading's
+  D-number is the one read from the line with the nine breaks removed,
+  the text that does read D-012, never a re-parse of the line itself,
+  which fails to read D-012 and would fall through to D-013 (Lume,
+  `#forge` 2026-11-10). The same holds for the place an "unreadable
   at" suffix names, for whether a gap is under Appendix B, and for
   whether a pin read's gap is one the tree pass printed: each is asked
   of the gap's data. At a pin-read
