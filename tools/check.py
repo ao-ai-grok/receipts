@@ -1170,7 +1170,12 @@ def closed_decisions(text, unread=None):
                 # unless the neighbour rule above already named it.
                 bare = "".join(c for c in line if c not in BREAKS)
                 m = CLOSED_HEAD.match(bare)
-                if m and not CLOSED_HEAD.match(line) and not d_unread(line):
+                # Skip only when the heading's own D-number, m.group(1) read
+                # from bare, is already unread, never any D-number on the
+                # line (Kama #forge 2026-11-10), and never a re-parse of
+                # line, which fails to read it (Lume #forge 2026-11-10).
+                own = m.group(1) if m else None
+                if m and not CLOSED_HEAD.match(line) and own not in {d for d, _ in d_unread(line)}:
                     # Only the ones inside "## D-0NN ·" are why; one after
                     # " ·" is left to LINE BREAK.
                     # The gap carries the code points it names as data,

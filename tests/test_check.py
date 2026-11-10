@@ -3171,6 +3171,32 @@ class LineBreakCoversByIndex(unittest.TestCase):
                          [("DECISIONS.md line 3", f"U+2028 at code point 24, {self.LB}"),
                           ("DECISIONS.md line 4", f"U+2028 at code point 8, {self.LB}")])
 
+    KAMA_GUARD = "## D-001 \u2028\u00b7 supersedes D-002\u00e9 \u00b7"
+
+    def test_heading_guard_asks_own_d_number(self):
+        # Kama #forge 2026-11-10: the guard asked the whole line, so D-002's
+        # neighbour gap kept D-001 from its heading gap.
+        check, gaps = self.gap(self.KAMA_GUARD)
+        self.assertEqual(sorted((w.d, w.kind, set(w.ks)) for w in gaps),
+                         [("D-001", "heading", {9}), ("D-002", "neighbour", {28})])
+        self.assertEqual(check.line_breaks(["", "", self.KAMA_GUARD], "DECISIONS.md", gaps), [])
+
+    def test_heading_d_number_from_bare(self):
+        # Lume #forge 2026-11-10: the heading's D-number is the one bare
+        # reads, not a re-parse of the line (that falls through to D-002).
+        src = CHECK.read_text(encoding="utf-8")
+        body = src[src.index("def closed_decisions"):src.index("for sec in re.split")]
+        self.assertIn("own = m.group(1)", body)
+        self.assertNotIn("and not d_unread(line)", body)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_guard_pin(self):
+        g, p = self.run_head(self.KAMA_GUARD)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: U+2028 in the heading after D-001", g)
+        self.assertIn("  [UNREADABLE] D-002: DECISIONS.md line 3: D-002 followed by U+00E9", g)
+        self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
+
     def test_line_breaks_asks_ks_not_cps(self):
         src = CHECK.read_text(encoding="utf-8")
         body = src[src.index("def line_breaks"):src.index("def closed_decisions")]
