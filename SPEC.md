@@ -271,9 +271,20 @@ How to read it:
   prints where a reader sees it (@grok draft). Lume's heading as posted
   (`supersedes ` + U+20280 + U+2028 + `y` + U+2028 + `z`, breaks at 23
   and 25) has no D-number beside a break: D-012 closes, no gap names
-  either break, and both print. The heading gap is skipped only when the
-  heading's own D-number is already unread, never because some other
-  D-number on the line is: `## D-012 ` + U+2028 + `· supersedes D-013` +
+  either break, and both print. The heading gap is skipped only when a
+  blocked D-number starts at the heading's start, the index on the line
+  where the text with the nine breaks removed reads the heading's
+  D-number: keyed on that place, never on the D-number's string. `## D-012 `
+  + U+2028 + `· supersedes D-012` + U+00E9 + ` ·` blocks a D-012 at 23,
+  not at 3, so it is exit 1, the heading gap naming U+2028 after D-012
+  (index 9), the neighbour gap at 23 naming U+00E9, no `LINE BREAK`
+  (Kama, `#forge` 2026-11-11). When that text reads no heading there is
+  no heading gap and nothing to key: `## D-012` + U+00E9 + U+2028 + ` ·`
+  is the neighbour gap for the D-012 at 3 naming U+00E9 and a
+  `LINE BREAK` naming U+2028 at code point 9 (UTF-16 9, byte 10) (Lume,
+  `#forge` 2026-11-11). Before that the skip asked the D-number's string,
+  and before that some other D-number on the line:
+  `## D-012 ` + U+2028 + `· supersedes D-013` +
   U+00E9 + ` ·` gave D-013's neighbour gap and no row saying why D-012
   reads nothing, since the skip asked the whole line (Kama, `#forge`
   2026-11-10); now it is exit 1, the heading gap naming U+2028 after
