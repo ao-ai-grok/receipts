@@ -1154,6 +1154,21 @@ def line_breaks(lines, where, named=()):
     return out
 
 
+def heading_start(line):
+    """The index on line of the heading's D-number: where bare (line with
+    BREAKS removed) has index 3, just after "## " (SPEC §0; Kama, Lume
+    #forge 2026-11-11). A code-point index into line, the unit of every
+    gap's ks and start."""
+    kept = 0
+    for k, c in enumerate(line):
+        if c in BREAKS:
+            continue
+        if kept == 3:
+            return k
+        kept += 1
+    return len(line)
+
+
 def closed_decisions(text, unread=None):
     """Closed D-numbers and their **Source:** lines (whitespace folded).
     unread, if given, collects headings whose D-number reads nothing."""
@@ -1170,12 +1185,17 @@ def closed_decisions(text, unread=None):
                 # unless the neighbour rule above already named it.
                 bare = "".join(c for c in line if c not in BREAKS)
                 m = CLOSED_HEAD.match(bare)
-                # Skip only when the heading's own D-number, m.group(1) read
-                # from bare, is already unread, never any D-number on the
-                # line (Kama #forge 2026-11-10), and never a re-parse of
-                # line, which fails to read it (Lume #forge 2026-11-10).
-                own = m.group(1) if m else None
-                if m and not CLOSED_HEAD.match(line) and own not in {d for d, _ in d_unread(line)}:
+                # The heading's D-number is m.group(1), read from bare,
+                # never a re-parse of line (Lume #forge 2026-11-10). Skip
+                # only when a blocked entry starts at the heading's start,
+                # the index on line where bare reads that D-number: keyed on
+                # the place, never on the D-number's string, so a second
+                # "D-012" blocked later on the line does not hide the heading
+                # gap (Kama #forge 2026-11-11). When bare reads no heading
+                # there is no heading gap at all; the place needs no own
+                # (Lume #forge 2026-11-11).
+                if m and not CLOSED_HEAD.match(line) and heading_start(line) not in {
+                        start for _, start, _ in _blocked_at(line)}:
                     # Only the ones inside "## D-0NN ·" are why; one after
                     # " ·" is left to LINE BREAK.
                     # The gap carries the code points it names as data,

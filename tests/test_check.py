@@ -3186,8 +3186,11 @@ class LineBreakCoversByIndex(unittest.TestCase):
         # reads, not a re-parse of the line (that falls through to D-002).
         src = CHECK.read_text(encoding="utf-8")
         body = src[src.index("def closed_decisions"):src.index("for sec in re.split")]
-        self.assertIn("own = m.group(1)", body)
         self.assertNotIn("and not d_unread(line)", body)
+        # Kama #forge 2026-11-11: the skip keys on the place, never on the
+        # D-number's string.
+        self.assertIn("heading_start(line) not in", body)
+        self.assertNotIn("in {d for d, _ in d_unread(line)}", body)
 
     @unittest.skipUnless(shutil.which("git"), "git not installed")
     def test_kama_guard_pin(self):
@@ -3196,6 +3199,53 @@ class LineBreakCoversByIndex(unittest.TestCase):
         self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: U+2028 in the heading after D-001", g)
         self.assertIn("  [UNREADABLE] D-002: DECISIONS.md line 3: D-002 followed by U+00E9", g)
         self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
+
+    KAMA_SAME = "## D-001 \u2028\u00b7 supersedes D-001\u00e9 \u00b7"
+    LUME_OWN = "## D-001\u00e9\u2028 \u00b7"
+
+    def test_heading_skip_keys_on_place(self):
+        # Kama #forge 2026-11-11: the heading's own D-number blocked later on
+        # the line (at 23, by U+00E9) is not why the heading reads nothing.
+        check, gaps = self.gap(self.KAMA_SAME)
+        self.assertEqual(sorted((w.d, w.kind, set(w.ks)) for w in gaps),
+                         [("D-001", "heading", {9}), ("D-001", "neighbour", {28})])
+        self.assertEqual(check.line_breaks(["", "", self.KAMA_SAME], "DECISIONS.md", gaps), [])
+        self.assertEqual(check.heading_start(self.KAMA_SAME), 3)
+        self.assertEqual([s for _, s, _ in check._blocked_at(self.KAMA_SAME)], [23])
+
+    def test_heading_start_skips_breaks(self):
+        self.assertEqual(import_check().heading_start("##\u2028 D-001 \u00b7"), 4)
+        self.assertEqual(import_check().heading_start("## \u2028D-001 \u00b7"), 4)
+        self.assertEqual(import_check().heading_start("## D-001 \u00b7"), 3)
+
+    def test_lume_own_blocked_at_start(self):
+        # Lume #forge 2026-11-11: bare reads no heading, so there is no own
+        # and no heading gap; the blocked D-001 at 3 names U+00E9 and the
+        # U+2028 at code point 9 (byte 10) prints LINE BREAK.
+        line = self.LUME_OWN
+        self.assertEqual(line.index("\u2028"), 9)
+        self.assertEqual(line.encode().index("\u2028".encode()), 10)
+        check, gaps = self.gap(line)
+        self.assertEqual([(w.d, w.kind, set(w.ks)) for w in gaps], [("D-001", "neighbour", {8})])
+        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", gaps),
+                         [("DECISIONS.md line 3", f"U+2028 at code point 9, {self.LB}")])
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_same_number_pin(self):
+        g, p = self.run_head(self.KAMA_SAME)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: U+2028 in the heading after D-001", g)
+        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: D-001 followed by U+00E9", g)
+        self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_lume_own_pin(self):
+        g, p = self.run_head(self.LUME_OWN)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: D-001 followed by U+00E9", g)
+        self.assertEqual([l for l in g if "in the heading after" in l], [])
+        self.assertEqual([l.strip() for l in g if "[LINE BREAK]" in l],
+                         [f"[LINE BREAK] DECISIONS.md line 3: U+2028 at code point 9, {self.LB}"])
 
     def test_line_breaks_asks_ks_not_cps(self):
         src = CHECK.read_text(encoding="utf-8")
