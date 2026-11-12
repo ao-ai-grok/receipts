@@ -1186,34 +1186,38 @@ def closed_decisions(text, unread=None):
                 bare = "".join(c for c in line if c not in BREAKS)
                 m = CLOSED_HEAD.match(bare)
                 # The heading's D-number is m.group(1), read from bare,
-                # never a re-parse of line (Lume #forge 2026-11-10). Skip
-                # only when a blocked entry starts at the heading's start,
-                # the index on line where bare reads that D-number: keyed on
-                # the place, never on the D-number's string, so a second
-                # "D-012" blocked later on the line does not hide the heading
-                # gap (Kama #forge 2026-11-11). When bare reads no heading
-                # there is no heading gap at all; the place needs no own
+                # never a re-parse of line (Lume #forge 2026-11-10). The
+                # heading gap covers by index, like LINE BREAK: it names the
+                # breaks in head that no neighbour gap on the line carries
+                # as ks, and is skipped only when none are left (Kama #forge
+                # 2026-11-12). Never all or nothing: a blocked entry at
+                # heading_start(line) covers only the break beside it, not
+                # a second break inside "## D-0NN ·". Keyed on index, never
+                # on the D-number's string (Kama #forge 2026-11-11). When
+                # bare reads no heading there is no heading gap at all
                 # (Lume #forge 2026-11-11).
-                if m and not CLOSED_HEAD.match(line) and heading_start(line) not in {
-                        start for _, start, _ in _blocked_at(line)}:
+                if m and not CLOSED_HEAD.match(line):
                     # Only the ones inside "## D-0NN ·" are why; one after
                     # " ·" is left to LINE BREAK.
                     # The gap carries the code points it names as data,
                     # like the neighbour gap (Kama, Lume #forge 2026-11-08).
+                    carried = {k for _, _, ks in _blocked_at(line) for k in ks}
                     head, kept = [], 0
                     for k, c in enumerate(line):
                         if kept == m.end():
                             break
                         if c in BREAKS:
-                            head.append(k)
+                            if k not in carried:
+                                head.append(k)
                         else:
                             kept += 1
-                    place = f"DECISIONS.md line {n}"
-                    cps = ", ".join(f"U+{ord(c):04X}" for c in dict.fromkeys(line[k] for k in head))
-                    row = f"{place}: {cps} in the heading after {m.group(1)}"
-                    unread.setdefault(m.group(1), []).append(named_gap(
-                        row + ", read as no D-number", row, place, place, None, m.group(1),
-                        "heading", head, (), {(place, ord(line[k])) for k in head}))
+                    if head:
+                        place = f"DECISIONS.md line {n}"
+                        cps = ", ".join(f"U+{ord(c):04X}" for c in dict.fromkeys(line[k] for k in head))
+                        row = f"{place}: {cps} in the heading after {m.group(1)}"
+                        unread.setdefault(m.group(1), []).append(named_gap(
+                            row + ", read as no D-number", row, place, place, None, m.group(1),
+                            "heading", head, (), {(place, ord(line[k])) for k in head}))
     for sec in re.split(r"(?m)^## ", text):
         m = re.match(r"(D-[0-9]{3})" + D_AFTER + " ·", sec, A)
         if not m:

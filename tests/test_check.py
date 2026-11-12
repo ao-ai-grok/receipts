@@ -3189,8 +3189,12 @@ class LineBreakCoversByIndex(unittest.TestCase):
         self.assertNotIn("and not d_unread(line)", body)
         # Kama #forge 2026-11-11: the skip keys on the place, never on the
         # D-number's string.
-        self.assertIn("heading_start(line) not in", body)
         self.assertNotIn("in {d for d, _ in d_unread(line)}", body)
+        # Kama #forge 2026-11-12: the skip is not all or nothing; the heading
+        # gap covers by index, the ks the line's neighbour gaps carry.
+        self.assertNotIn("heading_start(line) not in", body)
+        self.assertIn("for k in ks}", body)
+        self.assertIn("if k not in carried", body)
 
     @unittest.skipUnless(shutil.which("git"), "git not installed")
     def test_kama_guard_pin(self):
@@ -3246,6 +3250,44 @@ class LineBreakCoversByIndex(unittest.TestCase):
         self.assertEqual([l for l in g if "in the heading after" in l], [])
         self.assertEqual([l.strip() for l in g if "[LINE BREAK]" in l],
                          [f"[LINE BREAK] DECISIONS.md line 3: U+2028 at code point 9, {self.LB}"])
+
+    KAMA_ALL = "## \u2028D-001 \u2029\u00b7 title"
+
+    def test_heading_gap_names_what_neighbours_leave(self):
+        # Kama #forge 2026-11-12: U+2028 at 3 blocks D-001 (ks {3}), so on
+        # 0f758bd the whole heading gap was skipped and the U+2029 at 10,
+        # inside "## D-001 ·", printed only as LINE BREAK. The heading gap
+        # names the breaks in head no neighbour gap carries.
+        line = self.KAMA_ALL
+        check, gaps = self.gap(line)
+        self.assertEqual((line.index("\u2028"), line.index("\u2029")), (3, 10))
+        self.assertEqual(check.heading_start(line), 4)
+        self.assertEqual(check._blocked_at(line), [("D-001", 4, [3])])
+        self.assertEqual(sorted((w.d, w.kind, set(w.ks)) for w in gaps),
+                         [("D-001", "heading", {10}), ("D-001", "neighbour", {3})])
+        h, = [w for w in gaps if w.kind == "heading"]
+        self.assertEqual(h.row, "DECISIONS.md line 3: U+2029 in the heading after D-001")
+        self.assertEqual(h.cps, {("DECISIONS.md line 3", 0x2029)})
+        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", gaps), [])
+
+    def test_heading_gap_skipped_when_none_left(self):
+        # The neighbour gap carries the only break in head: no heading gap.
+        for line in ("## \u2028D-001 \u00b7 title", "## D-001\u2028 \u00b7 title"):
+            with self.subTest(line=line):
+                check, gaps = self.gap(line)
+                self.assertEqual([w.kind for w in gaps], ["neighbour"])
+                self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", gaps), [])
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_all_or_nothing_pin(self):
+        # Before (0f758bd): the neighbour gap and LINE BREAK at code point 10,
+        # no row saying the U+2029 is why D-001 reads nothing.
+        g, p = self.run_head(self.KAMA_ALL)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: U+2028 before D-001", g)
+        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: U+2029 in the heading after D-001", g)
+        self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
+        self.assertNotIn("code point 10,", p.stdout)
 
     def test_line_breaks_asks_ks_not_cps(self):
         src = CHECK.read_text(encoding="utf-8")
