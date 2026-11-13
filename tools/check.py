@@ -1213,8 +1213,13 @@ def closed_decisions(text, unread=None):
                             kept += 1
                     if head:
                         place = f"DECISIONS.md line {n}"
-                        cps = ", ".join(f"U+{ord(c):04X}" for c in dict.fromkeys(line[k] for k in head))
-                        row = f"{place}: {cps} in the heading after {m.group(1)}"
+                        # Each break by code point and index, as LINE BREAK
+                        # names them, never deduped by code point: ks carries
+                        # every index, so the row prints every one (Kama
+                        # #forge 2026-11-13). "in D-0NN's heading", never
+                        # "after": a break can sit inside the D-number.
+                        cps = ", ".join(f"U+{ord(line[k]):04X} at code point {k}" for k in head)
+                        row = f"{place}: {cps} in {m.group(1)}'s heading"
                         unread.setdefault(m.group(1), []).append(named_gap(
                             row + ", read as no D-number", row, place, place, None, m.group(1),
                             "heading", head, (), {(place, ord(line[k])) for k in head}))

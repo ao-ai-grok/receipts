@@ -2422,12 +2422,12 @@ class AutocrlfCheckout(unittest.TestCase):
         # autocrlf (CRLF line ends around it) and without.
         edit = lambda raw: raw.replace(b"## D-001 \xc2\xb7", b"## D-001\r \xc2\xb7")
         same, p = self.cover(DECISIONS, edit)
-        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: U+000D in the heading after D-001\n",
+        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: U+000D at code point 8 in D-001's heading\n",
                       p.stdout)
         self.assertEqual(p.stdout.count("U+000D"), 1, p.stdout)
         self.assertEqual(p.returncode, 1)
         p = Coverage.cover(self, decisions=DECISIONS.replace("## D-001 ·", "## D-001\r ·"))
-        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: U+000D in the heading after D-001\n",
+        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: U+000D at code point 8 in D-001's heading\n",
                       p.stdout)
         self.assertEqual(p.returncode, 1)
 
@@ -2562,14 +2562,14 @@ class OneReaderBothFiles(unittest.TestCase):
                 dec = DECISIONS.replace("## D-001 ·", f"## D-001{c} ·")
                 p = Coverage.cover(self, decisions=dec)
                 why = (f"D-001 followed by {cp}" if not c.isascii()
-                       else f"{cp} in the heading after D-001")
+                       else f"{cp} at code point 8 in D-001's heading")
                 self.assertIn(f"[UNREADABLE] D-001: DECISIONS.md line 3: {why}\n", p.stdout)
                 self.assertEqual(p.stdout.count(cp), 1, p.stdout)
                 self.assertNotIn("[LINE BREAK]", p.stdout)
         # One inside the heading and one after " ·": only the first is why.
         dec = DECISIONS.replace("## D-001 · 2026-08-07 · Process", "## D-001\x0b · 2026-08-07 · Pro\rcess")
         p = Coverage.cover(self, decisions=dec)
-        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: U+000B in the heading after D-001\n", p.stdout)
+        self.assertIn("[UNREADABLE] D-001: DECISIONS.md line 3: U+000B at code point 8 in D-001's heading\n", p.stdout)
         self.assertIn("[LINE BREAK] DECISIONS.md line 3: U+000D at code point 28, a line break", p.stdout)
         self.assertEqual(p.stdout.count("U+000B"), 1)
 
@@ -2987,7 +2987,7 @@ class NoPrintedTextReadBack(unittest.TestCase):
         unread = {}
         check.closed_decisions("# D\n\n" + line + "\n", unread)
         w, = unread["D-001"]
-        self.assertEqual(w, "DECISIONS.md line 3: U+2028 in the heading after D-001, read as no D-number")
+        self.assertEqual(w, "DECISIONS.md line 3: U+2028 at code point 9 in D-001's heading, read as no D-number")
         self.assertEqual((w.kind, w.cps), ("heading", {("DECISIONS.md line 3", 0x2028)}))
         self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]),
                          [("DECISIONS.md line 3", f"U+2029 at code point 14, {self.LB}")])
@@ -3200,7 +3200,7 @@ class LineBreakCoversByIndex(unittest.TestCase):
     def test_kama_guard_pin(self):
         g, p = self.run_head(self.KAMA_GUARD)
         self.assertEqual(p.returncode, 1)
-        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: U+2028 in the heading after D-001", g)
+        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: U+2028 at code point 9 in D-001's heading", g)
         self.assertIn("  [UNREADABLE] D-002: DECISIONS.md line 3: D-002 followed by U+00E9", g)
         self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
 
@@ -3238,7 +3238,7 @@ class LineBreakCoversByIndex(unittest.TestCase):
     def test_kama_same_number_pin(self):
         g, p = self.run_head(self.KAMA_SAME)
         self.assertEqual(p.returncode, 1)
-        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: U+2028 in the heading after D-001", g)
+        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: U+2028 at code point 9 in D-001's heading", g)
         self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: D-001 followed by U+00E9", g)
         self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
 
@@ -3247,7 +3247,7 @@ class LineBreakCoversByIndex(unittest.TestCase):
         g, p = self.run_head(self.LUME_OWN)
         self.assertEqual(p.returncode, 1)
         self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: D-001 followed by U+00E9", g)
-        self.assertEqual([l for l in g if "in the heading after" in l], [])
+        self.assertEqual([l for l in g if "'s heading" in l], [])
         self.assertEqual([l.strip() for l in g if "[LINE BREAK]" in l],
                          [f"[LINE BREAK] DECISIONS.md line 3: U+2028 at code point 9, {self.LB}"])
 
@@ -3266,7 +3266,7 @@ class LineBreakCoversByIndex(unittest.TestCase):
         self.assertEqual(sorted((w.d, w.kind, set(w.ks)) for w in gaps),
                          [("D-001", "heading", {10}), ("D-001", "neighbour", {3})])
         h, = [w for w in gaps if w.kind == "heading"]
-        self.assertEqual(h.row, "DECISIONS.md line 3: U+2029 in the heading after D-001")
+        self.assertEqual(h.row, "DECISIONS.md line 3: U+2029 at code point 10 in D-001's heading")
         self.assertEqual(h.cps, {("DECISIONS.md line 3", 0x2029)})
         self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", gaps), [])
 
@@ -3285,9 +3285,44 @@ class LineBreakCoversByIndex(unittest.TestCase):
         g, p = self.run_head(self.KAMA_ALL)
         self.assertEqual(p.returncode, 1)
         self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: U+2028 before D-001", g)
-        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: U+2029 in the heading after D-001", g)
+        self.assertIn("  [UNREADABLE] D-001: DECISIONS.md line 3: U+2029 at code point 10 in D-001's heading", g)
         self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
         self.assertNotIn("code point 10,", p.stdout)
+
+    KAMA_ROW = "## D-0\u202801\u2028 \u00b7 title"
+
+    def test_heading_row_names_each_break_by_index(self):
+        # Kama #forge 2026-11-13: on 2ae7762 the row went through
+        # dict.fromkeys and said "after", so two U+2028 (6, inside the
+        # D-number, and 9) printed as one "U+2028 in the heading after
+        # D-012". The row names each break in ks by code point and index.
+        check = import_check()
+        line = "## D-0\u202812\u2028 \u00b7 title"
+        self.assertEqual(check._blocked_at(line), [])
+        unread = {}
+        check.closed_decisions("# D\n\n" + line + "\n", unread)
+        w, = unread["D-012"]
+        self.assertEqual((w.kind, set(w.ks)), ("heading", {6, 9}))
+        self.assertEqual(w.row, "DECISIONS.md line 3: U+2028 at code point 6, "
+                                "U+2028 at code point 9 in D-012's heading")
+        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+
+    def test_heading_row_not_deduped(self):
+        src = CHECK.read_text(encoding="utf-8")
+        body = src[src.index("def closed_decisions"):src.index("for sec in re.split")]
+        code = "\n".join(l.split("#")[0] for l in body.split("\n"))
+        self.assertNotIn("dict.fromkeys", code)
+        self.assertNotIn("in the heading after", code)
+        self.assertIn("for k in head", code)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_row_pin(self):
+        g, p = self.run_head(self.KAMA_ROW)
+        self.assertEqual(p.returncode, 1)
+        rows = [l.strip() for l in g if "[UNREADABLE]" in l]
+        self.assertEqual(rows, ["[UNREADABLE] D-001: DECISIONS.md line 3: U+2028 at code point 6, "
+                                "U+2028 at code point 9 in D-001's heading"])
+        self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
 
     def test_line_breaks_asks_ks_not_cps(self):
         src = CHECK.read_text(encoding="utf-8")
