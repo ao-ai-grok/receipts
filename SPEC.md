@@ -189,7 +189,7 @@ How to read it:
   already why a D-number reads nothing, the `UNREADABLE` gap names it and
   `LINE BREAK` does not repeat it: one inside a heading, when it is why
   the heading reads no closed D-number, is `UNREADABLE`: `DECISIONS.md
-  line 3: U+000D in the heading after D-001` (Lume, `#forge` 2026-11-02;
+  line 3: U+000D at code point 8 in D-001's heading` (Lume, `#forge` 2026-11-02;
   all nine since 2026-11-03), and U+2028 just after a D-number is the
   neighbour gap, `D-035 followed by U+2028`. A CR that breaks nothing (after
   ` ·`, in prose) was silent before; it is now a `LINE BREAK` gap, as
@@ -239,7 +239,7 @@ How to read it:
   checker printed; it takes the span or code point that produced the
   string (Lume, `#forge` 2026-11-08). Each `UNREADABLE` gap carries, as
   data, the code points it names on its line, the heading gap
-  (`U+000D in the heading after D-001`) too, and `LINE BREAK` asks
+  (`U+000D at code point 8 in D-001's heading`) too, and `LINE BREAK` asks
   that, never whether `U+2028` sits inside a printed gap: code points
   above U+FFFF print five digits, so `U+2028` is a substring of
   `U+20280`, and every code point from U+20280 to U+2029F (32, all CJK
@@ -282,7 +282,15 @@ How to read it:
   nothing, printed only as `LINE BREAK` and became a reason only after
   the first fix and a rerun (Kama, `#forge` 2026-11-12); now it is exit
   1, the neighbour gap naming U+2028 (index 3), the heading gap naming
-  U+2029 after D-012 (index 10), no `LINE BREAK`. Before that the skip
+  U+2029 at 10 in D-012's heading, no `LINE BREAK`. The heading gap's
+  row names each break it carries by code point and index, as `LINE
+  BREAK` does, never one per code point, and says `in D-0NN's heading`,
+  never `after`: `## D-0` + U+2028 + `12` + U+2028 + ` · title` blocks
+  nothing on the line and holds U+2028 at 6 (inside the D-number) and at
+  9, and the row printed `U+2028 in the heading after D-012`, one break
+  where there are two (Kama, `#forge` 2026-11-13); now it is exit 1, one
+  heading gap `U+2028 at code point 6, U+2028 at code point 9 in D-012's
+  heading` (indices 6 and 9), no `LINE BREAK`. Before that the skip
   asked whether a blocked D-number starts at the heading's start, the
   index on the line where the text with the nine breaks removed reads
   the heading's D-number, keyed on that place, never on the D-number's
