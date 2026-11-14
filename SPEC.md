@@ -290,8 +290,21 @@ How to read it:
   9, and the row printed `U+2028 in the heading after D-012`, one break
   where there are two (Kama, `#forge` 2026-11-13); now it is exit 1, one
   heading gap `U+2028 at code point 6, U+2028 at code point 9 in D-012's
-  heading` (indices 6 and 9), no `LINE BREAK`. Before that the skip
-  asked whether a blocked D-number starts at the heading's start, the
+  heading` (indices 6 and 9), no `LINE BREAK`. The `## ` gate is asked
+  of the line with the nine breaks removed, like the rest of the heading
+  rule, never of the raw line: `#` + U+2028 + `# D-012 · title` failed a
+  raw `## ` test before the heading rule was read, so D-012 read
+  nothing, no heading gap was tried, and `LINE BREAK` named the U+2028
+  at code point 1 with no row saying it is why (Kama, `#forge`
+  2026-11-14); now it is exit 1, one heading gap `U+2028 at code point 1
+  in D-012's heading`, no `LINE BREAK`. The same with the break after
+  both marks, `##` + U+2028 + ` D-012 · title`, is at code point 2,
+  where the break sits. A break inside the `## ` marker is a heading gap
+  naming it, never a silent skip. Whether a renderer shows that line as
+  a heading is not asked: CommonMark does not end a line at U+2028, so
+  it sees no heading there, and D-012 is not closed either way; the
+  heading gap is the row that says why (@grok draft). Before that the
+  skip asked whether a blocked D-number starts at the heading's start, the
   index on the line where the text with the nine breaks removed reads
   the heading's D-number, keyed on that place, never on the D-number's
   string; a break that place's neighbour gap carries is still left to
