@@ -1177,13 +1177,18 @@ def closed_decisions(text, unread=None):
     text = "\n".join(lines)
     if unread is not None:
         for n, line in enumerate(lines, 1):
-            if line.startswith("## "):
+            bare = "".join(c for c in line if c not in BREAKS)
+            # The gate is asked of bare, like the rest of the heading rule,
+            # never of the raw line: "#", U+2028, "# D-012 · title" failed
+            # a raw "## " test before bare was read, so no heading gap was
+            # tried and only LINE BREAK named the U+2028 at 1 (Kama #forge
+            # 2026-11-14). A break inside the marker is a heading gap.
+            if bare.startswith("## "):
                 add_unread(unread, f"DECISIONS.md line {n}", line)
                 # A CR, or any of BREAKS, left inside a heading, when it is
                 # why the heading reads no closed D-number, is named by code
                 # point (Lume #forge 2026-11-02; all nine: 2026-11-03),
                 # unless the neighbour rule above already named it.
-                bare = "".join(c for c in line if c not in BREAKS)
                 m = CLOSED_HEAD.match(bare)
                 # The heading's D-number is m.group(1), read from bare,
                 # never a re-parse of line (Lume #forge 2026-11-10). The

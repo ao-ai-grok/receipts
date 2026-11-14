@@ -3324,6 +3324,49 @@ class LineBreakCoversByIndex(unittest.TestCase):
                                 "U+2028 at code point 9 in D-001's heading"])
         self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
 
+    KAMA_GATE = "#\u2028# D-001 \u00b7 title"
+    GATE_AFTER = "##\u2028 D-001 \u00b7 title"
+
+    def test_heading_gate_asks_bare(self):
+        # Kama #forge 2026-11-14: closed_decisions gated on
+        # line.startswith("## ") of the raw line, so a break inside the
+        # marker failed the gate before bare was read: "#", U+2028,
+        # "# D-012 \u00b7 title" gave no heading gap and only LINE BREAK named
+        # the U+2028 at 1. Gate on bare. The break after both marks sits at
+        # 2, not 1.
+        check = import_check()
+        for line, k in (("#\u2028# D-012 \u00b7 title", 1), ("##\u2028 D-012 \u00b7 title", 2),
+                        (self.KAMA_GATE, 1), (self.GATE_AFTER, 2)):
+            with self.subTest(line=line):
+                d = "D-012" if "D-012" in line else "D-001"
+                self.assertEqual(check.break_indices(line), [(k, "\u2028")])
+                self.assertFalse(line.startswith("## "))
+                self.assertEqual(check._blocked_at(line), [])
+                unread = {}
+                self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                w, = unread[d]
+                self.assertEqual((w.kind, set(w.ks)), ("heading", {k}))
+                self.assertEqual(w.row, f"DECISIONS.md line 3: U+2028 at code point {k} in {d}'s heading")
+                self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+
+    def test_heading_gate_source(self):
+        src = CHECK.read_text(encoding="utf-8")
+        body = src[src.index("def closed_decisions"):src.index("for sec in re.split")]
+        code = "\n".join(l.split("#")[0] for l in body.split("\n"))
+        self.assertNotIn('line.startswith("', code)
+        self.assertIn('bare.startswith("', code)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_gate_pin(self):
+        for line, k in ((self.KAMA_GATE, 1), (self.GATE_AFTER, 2)):
+            with self.subTest(line=line):
+                g, p = self.run_head(line)
+                self.assertEqual(p.returncode, 1)
+                rows = [l.strip() for l in g if "[UNREADABLE]" in l]
+                self.assertEqual(rows, [f"[UNREADABLE] D-001: DECISIONS.md line 3: U+2028 at code point {k} "
+                                        "in D-001's heading"])
+                self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
+
     def test_line_breaks_asks_ks_not_cps(self):
         src = CHECK.read_text(encoding="utf-8")
         body = src[src.index("def line_breaks"):src.index("def closed_decisions")]
