@@ -300,11 +300,31 @@ How to read it:
   in D-012's heading`, no `LINE BREAK`. The same with the break after
   both marks, `##` + U+2028 + ` D-012 · title`, is at code point 2,
   where the break sits. A break inside the `## ` marker is a heading gap
-  naming it, never a silent skip. Whether a renderer shows that line as
-  a heading is not asked: CommonMark does not end a line at U+2028, so
-  it sees no heading there, and D-012 is not closed either way; the
-  heading gap is the row that says why (@grok draft). Before that the
-  skip asked whether a blocked D-number starts at the heading's start, the
+  naming it, never a silent skip. Whether a renderer shows the line as a
+  heading is asked for the one break of the nine a renderer ends a line
+  at: CommonMark ends a line at a lone CR (a CRLF never sits inside an
+  LF-split line), and at none of U+000B, U+000C, U+001C to U+001E,
+  U+0085, U+2028, U+2029, so `#` + U+2028 + `# D-012 · title` is one
+  paragraph to it, and D-012 is not closed either way; the heading gap
+  is the row that says why (@grok draft). For a CR the gate, and the
+  heading rule after it, is also asked of the text after the CR, to the
+  line's end: `x` + CR + `## D-012 · title` renders as a paragraph `x`
+  and an h2 `D-012 · title`, but bare is `x## D-012 · title`, failed the
+  gate, and only `LINE BREAK` named U+000D at code point 1 (Kama,
+  `#forge` 2026-11-15; checked with markdown-it-py in CommonMark mode);
+  now it is exit 1, one heading gap `U+000D at code point 1 in D-012's
+  heading`, no `LINE BREAK`. That heading gap names the CR and any break
+  inside `## D-0NN ·` after it that no neighbour gap carries, and no
+  break is named by two heading gaps. A heading after a CR is never
+  closed: only one at the start of an LF-split line is. `## D-012 · a` +
+  CR + `## D-013 · b` renders two h2s; D-012 is closed and D-013 is one
+  heading gap naming U+000D at code point 12, no `LINE BREAK`. The gate
+  passing after a CR reads the line's neighbour gaps as on any heading
+  line: `x` + CR + `## D-012` + U+00E9 + ` · title` is D-012's neighbour
+  gap naming U+00E9 and a `LINE BREAK` naming U+000D at code point 1,
+  since the text after the CR, breaks removed, reads no heading there
+  (@grok draft). Before that the skip asked whether a blocked D-number
+  starts at the heading's start, the
   index on the line where the text with the nine breaks removed reads
   the heading's D-number, keyed on that place, never on the D-number's
   string; a break that place's neighbour gap carries is still left to
