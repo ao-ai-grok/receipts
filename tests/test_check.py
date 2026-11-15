@@ -3367,6 +3367,101 @@ class LineBreakCoversByIndex(unittest.TestCase):
                                         "in D-001's heading"])
                 self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
 
+    KAMA_CR = "x\r## D-001 \u00b7 title"
+
+    def test_heading_gate_after_lone_cr(self):
+        # Kama #forge 2026-11-15: CommonMark ends a line at a lone CR, so
+        # "x", CR, "## D-012 \u00b7 title" renders a paragraph "x" and an h2
+        # "D-012 \u00b7 title". On 6da0a55 bare of the line was
+        # "x## D-012 \u00b7 title", the gate failed, and only LINE BREAK named
+        # U+000D at 1. The gate is also asked of the text after each CR.
+        check = import_check()
+        for line, d in (("x\r## D-012 \u00b7 title", "D-012"), (self.KAMA_CR, "D-001")):
+            with self.subTest(line=line):
+                self.assertEqual(check.break_indices(line), [(1, "\r")])
+                bare = "".join(c for c in line if c not in check.BREAKS)
+                self.assertFalse(bare.startswith("## "))
+                unread = {}
+                self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                w, = unread[d]
+                self.assertEqual((w.kind, set(w.ks)), ("heading", {1}))
+                self.assertEqual(w.row, f"DECISIONS.md line 3: U+000D at code point 1 in {d}'s heading")
+                self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+
+    def test_only_cr_is_a_renderer_line_end(self):
+        # The other eight BREAKS do not end a CommonMark line (checked with
+        # markdown-it-py, CommonMark mode): the line is one paragraph, the
+        # gate fails, and LINE BREAK names the break. Scope stays at CR.
+        check = import_check()
+        for c in check.BREAKS.replace("\r", ""):
+            with self.subTest(c=f"U+{ord(c):04X}"):
+                line = "x" + c + "## D-012 \u00b7 title"
+                unread = {}
+                self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                self.assertEqual(unread, {})
+                self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", []),
+                                 [("DECISIONS.md line 3", f"U+{ord(c):04X} at code point 1, "
+                                   "a line break to str.splitlines, not to grep -n")])
+
+    def test_cr_second_heading_on_line(self):
+        # "## D-012 \u00b7 a", CR, "## D-013 \u00b7 b" renders two h2s. D-012
+        # closes at the LF-split line's start; D-013, after the CR, never
+        # closes, and its heading gap names the CR at 12.
+        check = import_check()
+        line = "## D-012 \u00b7 a\r## D-013 \u00b7 b"
+        unread = {}
+        self.assertEqual(list(check.closed_decisions("# D\n\n" + line + "\n", unread)), ["D-012"])
+        self.assertEqual(list(unread), ["D-013"])
+        w, = unread["D-013"]
+        self.assertEqual((w.kind, set(w.ks)), ("heading", {12}))
+        self.assertEqual(w.row, "DECISIONS.md line 3: U+000D at code point 12 in D-013's heading")
+        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+
+    def test_cr_gate_reads_neighbour_gaps(self):
+        # The gate passing after a CR reads the line's neighbour gaps, as on
+        # any heading line; bare after the CR reads no heading, so no heading
+        # gap, and LINE BREAK names the CR (Lume #forge 2026-11-11's rule).
+        check = import_check()
+        line = "x\r## D-012\u00e9 \u00b7 title"
+        unread = {}
+        self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+        w, = unread["D-012"]
+        self.assertEqual((w.kind, set(w.ks)), ("neighbour", {10}))
+        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]),
+                         [("DECISIONS.md line 3", "U+000D at code point 1, "
+                           "a line break to str.splitlines, not to grep -n")])
+
+    def test_cr_break_named_by_one_heading_gap(self):
+        # A CR inside the marker of a heading the line's start reads is that
+        # heading gap's; one after a CR and inside the next head joins it. No
+        # break is named twice.
+        check = import_check()
+        for line, ks in (("#\r# D-012 \u00b7 title", [1]), ("x\r#\r# D-012 \u00b7 title", [1, 3]),
+                         ("x\r## D-0\r12 \u00b7 t", [1, 8])):
+            with self.subTest(line=line):
+                unread = {}
+                check.closed_decisions("# D\n\n" + line + "\n", unread)
+                w, = unread["D-012"]
+                self.assertEqual(sorted(w.ks), ks)
+                self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+
+    def test_cr_gate_source(self):
+        src = CHECK.read_text(encoding="utf-8")
+        body = src[src.index("def closed_decisions"):src.index("for sec in re.split")]
+        code = "\n".join(l.split("#")[0] for l in body.split("\n"))
+        self.assertIn('c == "\\r"', code)
+        self.assertIn("line[s:]", code)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_cr_pin(self):
+        # Before (6da0a55): exit 1 with only LINE BREAK naming U+000D at 1.
+        g, p = self.run_head(self.KAMA_CR)
+        self.assertEqual(p.returncode, 1)
+        rows = [l.strip() for l in g if "[UNREADABLE]" in l]
+        self.assertEqual(rows, ["[UNREADABLE] D-001: DECISIONS.md line 3: U+000D at code point 1 "
+                                "in D-001's heading"])
+        self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
+
     def test_line_breaks_asks_ks_not_cps(self):
         src = CHECK.read_text(encoding="utf-8")
         body = src[src.index("def line_breaks"):src.index("def closed_decisions")]

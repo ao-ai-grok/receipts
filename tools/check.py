@@ -1177,14 +1177,31 @@ def closed_decisions(text, unread=None):
     text = "\n".join(lines)
     if unread is not None:
         for n, line in enumerate(lines, 1):
-            bare = "".join(c for c in line if c not in BREAKS)
-            # The gate is asked of bare, like the rest of the heading rule,
-            # never of the raw line: "#", U+2028, "# D-012 · title" failed
-            # a raw "## " test before bare was read, so no heading gap was
-            # tried and only LINE BREAK named the U+2028 at 1 (Kama #forge
-            # 2026-11-14). A break inside the marker is a heading gap.
-            if bare.startswith("## "):
-                add_unread(unread, f"DECISIONS.md line {n}", line)
+            place = f"DECISIONS.md line {n}"
+            # The gate is asked of the line and, for each CR in it, of the
+            # text after that CR to the line's end (Kama #forge 2026-11-15):
+            # CommonMark ends a line at a lone CR, never at the other eight
+            # BREAKS, so "x", CR, "## D-012 \u00b7 title" renders an h2 while
+            # bare of the line, "x## D-012 \u00b7 title", failed the gate and
+            # only LINE BREAK named the CR at 1. Every CR left in an LF-split
+            # line is lone: the one before LF was dropped by lf_lines.
+            starts = [0] + [k + 1 for k, c in enumerate(line) if c == "\r"]
+            read_line, in_head = False, set()
+            for s in starts:
+                bare = "".join(c for c in line[s:] if c not in BREAKS)
+                # The gate is asked of bare, like the rest of the heading
+                # rule, never of the raw line: "#", U+2028, "# D-012 \u00b7
+                # title" failed a raw "## " test before bare was read, so no
+                # heading gap was tried and only LINE BREAK named the U+2028
+                # at 1 (Kama #forge 2026-11-14). A break inside the marker
+                # is a heading gap.
+                if not bare.startswith("## "):
+                    continue
+                if not read_line:
+                    # The line's neighbour gaps are read once, whichever
+                    # start opened the gate.
+                    add_unread(unread, place, line)
+                    read_line = True
                 # A CR, or any of BREAKS, left inside a heading, when it is
                 # why the heading reads no closed D-number, is named by code
                 # point (Lume #forge 2026-11-02; all nine: 2026-11-03),
@@ -1197,27 +1214,30 @@ def closed_decisions(text, unread=None):
                 # as ks, and is skipped only when none are left (Kama #forge
                 # 2026-11-12). Never all or nothing: a blocked entry at
                 # heading_start(line) covers only the break beside it, not
-                # a second break inside "## D-0NN ·". Keyed on index, never
+                # a second break inside "## D-0NN \u00b7". Keyed on index, never
                 # on the D-number's string (Kama #forge 2026-11-11). When
                 # bare reads no heading there is no heading gap at all
-                # (Lume #forge 2026-11-11).
-                if m and not CLOSED_HEAD.match(line):
-                    # Only the ones inside "## D-0NN ·" are why; one after
-                    # " ·" is left to LINE BREAK.
+                # (Lume #forge 2026-11-11). After a CR the heading is never
+                # closed (only one at an LF-split line's start is), so that
+                # CR is always why: head starts with it.
+                if m and (s or not CLOSED_HEAD.match(line)):
+                    # Only the ones inside "## D-0NN \u00b7" are why; one after
+                    # " \u00b7" is left to LINE BREAK.
                     # The gap carries the code points it names as data,
                     # like the neighbour gap (Kama, Lume #forge 2026-11-08).
                     carried = {k for _, _, ks in _blocked_at(line) for k in ks}
-                    head, kept = [], 0
-                    for k, c in enumerate(line):
+                    head, kept = ([s - 1] if s else []), 0
+                    for k, c in enumerate(line[s:], s):
                         if kept == m.end():
                             break
                         if c in BREAKS:
-                            if k not in carried:
-                                head.append(k)
+                            head.append(k)
                         else:
                             kept += 1
+                    # No break is named by two heading gaps on one line.
+                    head = [k for k in head if k not in carried and k not in in_head]
+                    in_head.update(head)
                     if head:
-                        place = f"DECISIONS.md line {n}"
                         # Each break by code point and index, as LINE BREAK
                         # names them, never deduped by code point: ks carries
                         # every index, so the row prints every one (Kama
