@@ -1195,7 +1195,15 @@ def closed_decisions(text, unread=None):
                 # heading gap was tried and only LINE BREAK named the U+2028
                 # at 1 (Kama #forge 2026-11-14). A break inside the marker
                 # is a heading gap.
-                if not bare.startswith("## "):
+                # After a CR the gate skips up to three spaces (U+0020), as
+                # CommonMark opens an ATX heading after up to three: "x", CR,
+                # " ## D-012 \u00b7 title" renders an h2, but bare after the
+                # CR, " ## D-012 \u00b7 title", failed "## " and only LINE
+                # BREAK named the CR at 1 (Kama #forge 2026-11-16). Four
+                # spaces, or a tab, is no heading. At an LF-split line's
+                # start no space is skipped: a heading closes at column 0.
+                ind = min(len(bare) - len(bare.lstrip(" ")), 3) if s else 0
+                if not bare.startswith("## ", ind):
                     continue
                 if not read_line:
                     # The line's neighbour gaps are read once, whichever
@@ -1206,7 +1214,9 @@ def closed_decisions(text, unread=None):
                 # why the heading reads no closed D-number, is named by code
                 # point (Lume #forge 2026-11-02; all nine: 2026-11-03),
                 # unless the neighbour rule above already named it.
-                m = CLOSED_HEAD.match(bare)
+                # m.end() counts bare from s, the skipped spaces too, so a
+                # break among them is in head, like one inside the marker.
+                m = CLOSED_HEAD.match(bare, ind)
                 # The heading's D-number is m.group(1), read from bare,
                 # never a re-parse of line (Lume #forge 2026-11-10). The
                 # heading gap covers by index, like LINE BREAK: it names the

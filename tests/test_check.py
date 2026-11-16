@@ -3462,6 +3462,87 @@ class LineBreakCoversByIndex(unittest.TestCase):
                                 "in D-001's heading"])
         self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
 
+    KAMA_CR_SP = "x\r ## D-001 \u00b7 title"
+
+    def test_cr_gate_skips_up_to_three_spaces(self):
+        # Kama #forge 2026-11-16: CommonMark opens an ATX heading after up to
+        # three spaces, so "x", CR, " ## D-012 \u00b7 title" renders a
+        # paragraph "x" and an h2. On 7957094 bare after the CR was
+        # " ## D-012 \u00b7 title", the gate failed, and only LINE BREAK named
+        # U+000D at 1. After a CR the gate skips up to three spaces.
+        check = import_check()
+        for n in (1, 2, 3):
+            for line, d in (("x\r" + " " * n + "## D-012 \u00b7 title", "D-012"),
+                            ("x\r" + " " * n + "## D-001 \u00b7 title", "D-001")):
+                with self.subTest(line=line):
+                    unread = {}
+                    self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                    w, = unread[d]
+                    self.assertEqual((w.kind, set(w.ks)), ("heading", {1}))
+                    self.assertEqual(w.row, f"DECISIONS.md line 3: U+000D at code point 1 in {d}'s heading")
+                    self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+
+    def test_cr_four_spaces_or_tab_is_no_heading(self):
+        # Four spaces, or a tab, after a CR is a paragraph continuation to
+        # CommonMark (markdown-it-py, CommonMark mode): no heading gap, and
+        # LINE BREAK names the CR, as on 7957094.
+        check = import_check()
+        for pre in ("    ", "     ", "\t", " \t", "\u00a0"):
+            with self.subTest(pre=repr(pre)):
+                line = "x\r" + pre + "## D-012 \u00b7 title"
+                unread = {}
+                self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                self.assertEqual(unread, {})
+                self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", []),
+                                 [("DECISIONS.md line 3", "U+000D at code point 1, "
+                                   "a line break to str.splitlines, not to grep -n")])
+
+    def test_cr_spaces_second_heading_and_break_among_spaces(self):
+        # A spaced heading after a CR is never closed, like an unspaced one;
+        # a break among the skipped spaces is in head, like one inside the
+        # marker, and named once.
+        check = import_check()
+        line = "## D-011 \u00b7 a\r  ## D-012 \u00b7 b"
+        unread = {}
+        self.assertEqual(list(check.closed_decisions("# D\n\n" + line + "\n", unread)), ["D-011"])
+        w, = unread["D-012"]
+        self.assertEqual((w.kind, sorted(w.ks)), ("heading", [12]))
+        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+        line = "x\r \u2028## D-012 \u00b7 t"
+        unread = {}
+        check.closed_decisions("# D\n\n" + line + "\n", unread)
+        w, = unread["D-012"]
+        self.assertEqual(sorted(w.ks), [1, 3])
+        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+
+    def test_lf_start_skips_no_spaces(self):
+        # Left out of scope (SPEC \u00a70, @grok 2026-11-16): at an LF-split
+        # line's start a heading closes only at column 0. " ## D-012" there
+        # is not closed and no heading gap is tried: no break to name.
+        check = import_check()
+        for n in (1, 2, 3):
+            with self.subTest(n=n):
+                unread = {}
+                self.assertEqual(check.closed_decisions("# D\n\n" + " " * n + "## D-012 \u00b7 t\n", unread), {})
+                self.assertEqual(unread, {})
+
+    def test_cr_space_gate_source(self):
+        src = CHECK.read_text(encoding="utf-8")
+        body = src[src.index("def closed_decisions"):src.index("for sec in re.split")]
+        code = "\n".join(l.split("#")[0] for l in body.split("\n"))
+        self.assertIn('lstrip(" ")', code)
+        self.assertIn("CLOSED_HEAD.match(bare, ind)", code)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_cr_space_pin(self):
+        # Before (7957094): exit 1 with only LINE BREAK naming U+000D at 1.
+        g, p = self.run_head(self.KAMA_CR_SP)
+        self.assertEqual(p.returncode, 1)
+        rows = [l.strip() for l in g if "[UNREADABLE]" in l]
+        self.assertEqual(rows, ["[UNREADABLE] D-001: DECISIONS.md line 3: U+000D at code point 1 "
+                                "in D-001's heading"])
+        self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
+
     def test_line_breaks_asks_ks_not_cps(self):
         src = CHECK.read_text(encoding="utf-8")
         body = src[src.index("def line_breaks"):src.index("def closed_decisions")]
