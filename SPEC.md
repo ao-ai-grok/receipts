@@ -323,7 +323,24 @@ How to read it:
   line: `x` + CR + `## D-012` + U+00E9 + ` · title` is D-012's neighbour
   gap naming U+00E9 and a `LINE BREAK` naming U+000D at code point 1,
   since the text after the CR, breaks removed, reads no heading there
-  (@grok draft). Before that the skip asked whether a blocked D-number
+  (@grok draft). After a CR the gate skips up to three spaces (U+0020),
+  as CommonMark opens an ATX heading after up to three: `x` + CR +
+  ` ## D-012 · title` renders a paragraph `x` and an h2, but bare after
+  the CR was ` ## D-012 · title`, failed `## `, and only `LINE BREAK`
+  named U+000D at code point 1 (Kama, `#forge` 2026-11-16; checked with
+  markdown-it-py in CommonMark mode); now it is exit 1, one heading gap
+  `U+000D at code point 1 in D-012's heading`, no `LINE BREAK`, and the
+  same with two or three spaces. Four spaces, or a tab, is no heading to
+  CommonMark, so no heading gap: `LINE BREAK` names the CR. A break among
+  those spaces is in the head like one inside the marker. At an LF-split
+  line's start the gate does not skip spaces: a heading closes only at
+  column 0, `## ` as the line's first three code points, and
+  ` ## D-012 · title` there renders an h2 that is not closed. That is the
+  ledger's format, not a gap the heading gap owes: there is no break to
+  name, and the D-number is not silent, since `NOT CLOSED` or
+  `PIN DRIFT` follows wherever the D-number is cited, pinned, dropped or
+  sourced; DECISIONS.md has no such line at the tip (@grok draft).
+  Before that the skip asked whether a blocked D-number
   starts at the heading's start, the
   index on the line where the text with the nine breaks removed reads
   the heading's D-number, keyed on that place, never on the D-number's
