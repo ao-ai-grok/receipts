@@ -983,7 +983,10 @@ def add_unread(unread, where, line, section=None):
             where, label, section, d, "neighbour", ks, spans, cps))
 
 
-CLOSED_HEAD = re.compile(r"## (D-[0-9]{3})" + D_AFTER + " ·", A)
+# One space or one tab after the hashes, then the D-number. Only after a CR
+# does the gate let a tab through; at column 0 it asks "## " (SPEC \u00a70; Lume
+# #forge 2026-11-16, Kama #forge 2026-11-17).
+CLOSED_HEAD = re.compile(r"##[ \t](D-[0-9]{3})" + D_AFTER + " ·", A)
 
 
 def bad_runs(raw: bytes):
@@ -1200,10 +1203,19 @@ def closed_decisions(text, unread=None):
                 # " ## D-012 \u00b7 title" renders an h2, but bare after the
                 # CR, " ## D-012 \u00b7 title", failed "## " and only LINE
                 # BREAK named the CR at 1 (Kama #forge 2026-11-16). Four
-                # spaces, or a tab, is no heading. At an LF-split line's
+                # spaces, or a tab, before the hashes is no heading. At an LF-split line's
                 # start no space is skipped: a heading closes at column 0.
+                # After a CR the gate, and CLOSED_HEAD, also take a tab after
+                # the hashes, as CommonMark takes a space or a tab: "x", CR,
+                # "##", TAB, "D-012 \u00b7 title" renders an h2, but the gate
+                # asked "## ", U+0020 only, and only LINE BREAK named the CR
+                # at 1 (Lume #forge 2026-11-16, Kama #forge 2026-11-17). At
+                # an LF-split line's start the ledger's format is "## ",
+                # U+0020: "##", TAB there is not closed, and no heading gap
+                # is tried, as there is no break to name.
                 ind = min(len(bare) - len(bare.lstrip(" ")), 3) if s else 0
-                if not bare.startswith("## ", ind):
+                heads = ("## ", "##\t") if s else ("## ",)
+                if not bare.startswith(heads, ind):
                     continue
                 if not read_line:
                     # The line's neighbour gaps are read once, whichever

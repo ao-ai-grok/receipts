@@ -3353,8 +3353,8 @@ class LineBreakCoversByIndex(unittest.TestCase):
         src = CHECK.read_text(encoding="utf-8")
         body = src[src.index("def closed_decisions"):src.index("for sec in re.split")]
         code = "\n".join(l.split("#")[0] for l in body.split("\n"))
-        self.assertNotIn('line.startswith("', code)
-        self.assertIn('bare.startswith("', code)
+        self.assertNotIn('line.startswith(', code)
+        self.assertIn('bare.startswith(', code)
 
     @unittest.skipUnless(shutil.which("git"), "git not installed")
     def test_kama_gate_pin(self):
@@ -3542,6 +3542,110 @@ class LineBreakCoversByIndex(unittest.TestCase):
         self.assertEqual(rows, ["[UNREADABLE] D-001: DECISIONS.md line 3: U+000D at code point 1 "
                                 "in D-001's heading"])
         self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
+
+    KAMA_CR_TAB = "x\r##\tD-001 \u00b7 title"
+    LUME_COL0_TAB = "##\tD-001 \u00b7 title"
+
+    def test_cr_gate_takes_a_tab_after_the_hashes(self):
+        # Lume #forge 2026-11-16, Kama #forge 2026-11-17: CommonMark takes a
+        # space or a tab after the hashes, so "x", CR, "##", TAB, "D-012
+        # \u00b7 title" renders a paragraph "x" and an h2. On 49c701f the
+        # gate asked "## ", U+0020 only, and only LINE BREAK named U+000D at
+        # 1. After a CR the gate and CLOSED_HEAD take a space or a tab, also
+        # after one to three skipped spaces.
+        check = import_check()
+        for n in (0, 1, 2, 3):
+            for d in ("D-012", "D-001"):
+                line = "x\r" + " " * n + "##\t" + d + " \u00b7 title"
+                with self.subTest(line=line):
+                    unread = {}
+                    self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                    w, = unread[d]
+                    self.assertEqual((w.kind, set(w.ks)), ("heading", {1}))
+                    self.assertEqual(w.row, f"DECISIONS.md line 3: U+000D at code point 1 in {d}'s heading")
+                    self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+
+    def test_cr_one_separator_then_the_d_number(self):
+        # One space or one tab, then the D-number, as at column 0: two tabs,
+        # a space and a tab, or a tab and a space still render an h2
+        # (markdown-it-py, CommonMark mode) but read no D-number, so LINE
+        # BREAK names the CR, never silence. U+00A0 after the hashes is no
+        # heading: LINE BREAK only. A tab before the hashes is still four
+        # columns: no heading.
+        check = import_check()
+        for sep in ("\t\t", " \t", "\t ", "\u00a0", "  "):
+            for pre in ("", "\t"):
+                with self.subTest(sep=repr(sep), pre=repr(pre)):
+                    line = "x\r" + pre + "##" + sep + "D-012 \u00b7 title"
+                    unread = {}
+                    self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                    self.assertEqual(unread, {})
+                    self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", []),
+                                     [("DECISIONS.md line 3", "U+000D at code point 1, "
+                                       "a line break to str.splitlines, not to grep -n")])
+
+    def test_cr_tab_second_heading_and_breaks_in_head(self):
+        # A tab heading after a CR is never closed; a break inside the
+        # marker or between the hashes and the tab is in head, named once.
+        check = import_check()
+        line = "## D-011 \u00b7 a\r##\tD-012 \u00b7 b"
+        unread = {}
+        self.assertEqual(list(check.closed_decisions("# D\n\n" + line + "\n", unread)), ["D-011"])
+        w, = unread["D-012"]
+        self.assertEqual((w.kind, sorted(w.ks)), ("heading", [12]))
+        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+        for line, ks in (("x\r#\u2028#\tD-012 \u00b7 t", [1, 3]),
+                         ("x\r##\u2028\tD-012 \u00b7 t", [1, 4]),
+                         ("x\r \u2028##\tD-012 \u00b7 t", [1, 3])):
+            with self.subTest(line=line):
+                unread = {}
+                check.closed_decisions("# D\n\n" + line + "\n", unread)
+                w, = unread["D-012"]
+                self.assertEqual(sorted(w.ks), ks)
+                self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+
+    def test_col0_tab_is_not_closed_and_no_heading_gap(self):
+        # Lume's pin at column 0, scoped (SPEC \u00a70, @grok 2026-11-17): the
+        # ledger's format is "## " with U+0020 after the hashes; "##", TAB,
+        # "D-012" there is not closed and no heading gap is tried: no break
+        # to name. Not silence: see test_lume_col0_tab_pin.
+        check = import_check()
+        for line in ("##\tD-012 \u00b7 t", "##\t\tD-012 \u00b7 t", "##\u2028\tD-012 \u00b7 t"):
+            with self.subTest(line=line):
+                unread = {}
+                self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                self.assertEqual(unread, {})
+
+    def test_cr_tab_gate_source(self):
+        src = CHECK.read_text(encoding="utf-8")
+        body = src[src.index("def closed_decisions"):src.index("for sec in re.split")]
+        code = "\n".join(l.split("#")[0] for l in body.split("\n"))
+        self.assertIn("bare.startswith(heads, ind)", code)
+        self.assertEqual(import_check().CLOSED_HEAD.pattern[:9], "##[ \\t](D")
+        # Column 0 closes only at "## ", U+0020 (SPEC \u00a70, @grok 2026-11-17).
+        self.assertIn('re.split(r"(?m)^## ", text)', src)
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_cr_tab_pin(self):
+        # Before (49c701f): exit 1 with only LINE BREAK naming U+000D at 1.
+        g, p = self.run_head(self.KAMA_CR_TAB)
+        self.assertEqual(p.returncode, 1)
+        rows = [l.strip() for l in g if "[UNREADABLE]" in l]
+        self.assertEqual(rows, ["[UNREADABLE] D-001: DECISIONS.md line 3: U+000D at code point 1 "
+                                "in D-001's heading"])
+        self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_lume_col0_tab_pin(self):
+        # Lume: "##", TAB, "D-012 \u00b7 title" read as D-012's heading or a
+        # named gap, never silence. At column 0 it is not closed (ledger
+        # format), so where the D-number is pinned, dropped or sourced it is
+        # named: PIN DRIFT and NOT CLOSED, exit 1, and no row claims a break.
+        g, p = self.run_head(self.LUME_COL0_TAB)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("  [PIN DRIFT] D-001: in the pin set; not closed in DECISIONS.md", g)
+        self.assertTrue(any(l.startswith("  [NOT CLOSED] D-001:") for l in g))
+        self.assertEqual([l for l in g if "[LINE BREAK]" in l or "[UNREADABLE]" in l], [])
 
     def test_line_breaks_asks_ks_not_cps(self):
         src = CHECK.read_text(encoding="utf-8")
