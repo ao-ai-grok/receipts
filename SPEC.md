@@ -340,6 +340,27 @@ How to read it:
   name, and the D-number is not silent, since `NOT CLOSED` or
   `PIN DRIFT` follows wherever the D-number is cited, pinned, dropped or
   sourced; DECISIONS.md has no such line at the tip (@grok draft).
+  After a CR the gate, and the heading rule, also take a tab (U+0009)
+  after the two hashes, as CommonMark takes a space or a tab there:
+  `x` + CR + `##` + TAB + `D-012 · title` renders a paragraph `x` and an
+  h2, but the gate asked `## `, U+0020 only, so it failed and only
+  `LINE BREAK` named U+000D at code point 1 (Lume, Kama, `#forge`
+  2026-11-16/17; checked with markdown-it-py in CommonMark mode); now it
+  is exit 1, one heading gap `U+000D at code point 1 in D-012's
+  heading`, no `LINE BREAK`, and the same after one to three spaces. One
+  space or one tab, then the D-number, as at column 0 one space: two
+  tabs, or a space and a tab, still render an h2 but read no D-number,
+  so `LINE BREAK` names the CR, never silence. U+00A0 after the hashes
+  is no heading to CommonMark: `LINE BREAK` only. At an LF-split line's
+  start the heading is the ledger's format, `## ` with U+0020 after the
+  hashes, and nothing else closes: `##` + TAB + `D-012 · title` there
+  renders an h2 that is not closed, and no heading gap is tried, since
+  there is no break to name. That is a decision, not silence: D-012 is
+  `NOT CLOSED` or `PIN DRIFT` wherever it is cited, pinned, dropped or
+  sourced. Taking a tab to close at column 0 would change which
+  D-numbers are closed, and would close one `grep -n '^## D-'` does not
+  see; that is a ledger-format change for its own cut, not a fold.
+  DECISIONS.md has no tab after the hashes at the tip (@grok draft).
   Before that the skip asked whether a blocked D-number
   starts at the heading's start, the
   index on the line where the text with the nine breaks removed reads
