@@ -347,11 +347,19 @@ How to read it:
   `LINE BREAK` named U+000D at code point 1 (Lume, Kama, `#forge`
   2026-11-16/17; checked with markdown-it-py in CommonMark mode); now it
   is exit 1, one heading gap `U+000D at code point 1 in D-012's
-  heading`, no `LINE BREAK`, and the same after one to three spaces. One
-  space or one tab, then the D-number, as at column 0 one space: two
-  tabs, or a space and a tab, still render an h2 but read no D-number,
-  so `LINE BREAK` names the CR, never silence. U+00A0 after the hashes
-  is no heading to CommonMark: `LINE BREAK` only. At an LF-split line's
+  heading`, no `LINE BREAK`, and the same after one to three spaces.
+  After a CR the heading rule takes one or more spaces or tabs after
+  the hashes, then the D-number, as CommonMark does: `x` + CR + `##` +
+  TAB + TAB + `D-012 · title` renders a paragraph `x` and an h2
+  `D-012 · title`, as do two spaces, a space and a tab, a tab and a
+  space, or eight spaces, but the heading rule asked for exactly one,
+  so no heading gap was tried and only `LINE BREAK` named U+000D at
+  code point 1 (Kama, `#forge` 2026-11-18; checked with markdown-it-py
+  in CommonMark mode); now each is exit 1, one heading gap `U+000D at
+  code point 1 in D-012's heading`, no `LINE BREAK`, also after one to
+  three spaces, and a break among the separators is in the head.
+  U+00A0 after the hashes is not a CommonMark space and no heading:
+  `LINE BREAK` only. At an LF-split line's
   start the heading is the ledger's format, `## ` with U+0020 after the
   hashes, and nothing else closes: `##` + TAB + `D-012 · title` there
   renders an h2 that is not closed, and no heading gap is tried, since
