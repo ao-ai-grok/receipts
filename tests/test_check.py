@@ -3531,7 +3531,7 @@ class LineBreakCoversByIndex(unittest.TestCase):
         body = src[src.index("def closed_decisions"):src.index("for sec in re.split")]
         code = "\n".join(l.split("#")[0] for l in body.split("\n"))
         self.assertIn('lstrip(" ")', code)
-        self.assertIn("CLOSED_HEAD.match(bare, ind)", code)
+        self.assertIn("head_re.match(bare, ind)", code)
 
     @unittest.skipUnless(shutil.which("git"), "git not installed")
     def test_kama_cr_space_pin(self):
@@ -3565,16 +3565,16 @@ class LineBreakCoversByIndex(unittest.TestCase):
                     self.assertEqual(w.row, f"DECISIONS.md line 3: U+000D at code point 1 in {d}'s heading")
                     self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
 
-    def test_cr_one_separator_then_the_d_number(self):
-        # One space or one tab, then the D-number, as at column 0: two tabs,
-        # a space and a tab, or a tab and a space still render an h2
-        # (markdown-it-py, CommonMark mode) but read no D-number, so LINE
-        # BREAK names the CR, never silence. U+00A0 after the hashes is no
-        # heading: LINE BREAK only. A tab before the hashes is still four
-        # columns: no heading.
+    def test_cr_no_heading_is_line_break_only(self):
+        # Kama #forge 2026-11-18: U+00A0 after the hashes is not a CommonMark
+        # space, no h2: LINE BREAK only. A tab, or four spaces, before the
+        # hashes is no heading whatever follows (markdown-it-py, CommonMark
+        # mode). Before 2026-11-18 two tabs, space+tab, tab+space and two
+        # spaces were here too; they render an h2, see
+        # test_cr_one_or_more_separators_then_the_d_number.
         check = import_check()
-        for sep in ("\t\t", " \t", "\t ", "\u00a0", "  "):
-            for pre in ("", "\t"):
+        for sep in ("\t\t", " \t", "\t ", "\u00a0", "  ", "\t", " "):
+            for pre in (("", "\t", "    ") if sep == "\u00a0" else ("\t", "    ")):
                 with self.subTest(sep=repr(sep), pre=repr(pre)):
                     line = "x\r" + pre + "##" + sep + "D-012 \u00b7 title"
                     unread = {}
@@ -3621,7 +3621,10 @@ class LineBreakCoversByIndex(unittest.TestCase):
         body = src[src.index("def closed_decisions"):src.index("for sec in re.split")]
         code = "\n".join(l.split("#")[0] for l in body.split("\n"))
         self.assertIn("bare.startswith(heads, ind)", code)
-        self.assertEqual(import_check().CLOSED_HEAD.pattern[:9], "##[ \\t](D")
+        self.assertEqual(import_check().CLOSED_HEAD.pattern[:10], "##[ \\t]+(D")
+        self.assertEqual(import_check().COL0_HEAD.pattern[:5], "## (D")
+        self.assertIn("CLOSED_HEAD if s else COL0_HEAD", code)
+        self.assertIn("not COL0_HEAD.match(line)", code)
         # Column 0 closes only at "## ", U+0020 (SPEC \u00a70, @grok 2026-11-17).
         self.assertIn('re.split(r"(?m)^## ", text)', src)
 
@@ -3646,6 +3649,72 @@ class LineBreakCoversByIndex(unittest.TestCase):
         self.assertIn("  [PIN DRIFT] D-001: in the pin set; not closed in DECISIONS.md", g)
         self.assertTrue(any(l.startswith("  [NOT CLOSED] D-001:") for l in g))
         self.assertEqual([l for l in g if "[LINE BREAK]" in l or "[UNREADABLE]" in l], [])
+
+    KAMA_CR_TAB_TAB = "x\r##\t\tD-001 \u00b7 title"
+
+    def test_cr_one_or_more_separators_then_the_d_number(self):
+        # Kama #forge 2026-11-18: CommonMark takes one or more spaces or tabs
+        # after the hashes. "x", CR, "##", TAB, TAB, "D-012 \u00b7 title"
+        # renders a paragraph and an h2 "D-012 \u00b7 title", as do space+space,
+        # space+tab, tab+space and eight spaces (markdown-it-py 4.3.0). On
+        # 92059f2 the gate opened but CLOSED_HEAD asked "##[ \\t](D-", so no
+        # heading gap was tried and only LINE BREAK named U+000D at 1.
+        check = import_check()
+        for sep in ("\t\t", "  ", " \t", "\t ", " " * 8, "\t" * 3, " \t \t"):
+            for n in (0, 1, 2, 3):
+                for d in ("D-012", "D-001"):
+                    line = "x\r" + " " * n + "##" + sep + d + " \u00b7 title"
+                    with self.subTest(line=line):
+                        unread = {}
+                        self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                        w, = unread[d]
+                        self.assertEqual((w.kind, set(w.ks)), ("heading", {1}))
+                        self.assertEqual(w.row, f"DECISIONS.md line 3: U+000D at code point 1 in {d}'s heading")
+                        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+
+    def test_cr_break_among_separators_and_second_heading(self):
+        # A break among the separators is in head, like one inside the
+        # marker, named once; a second heading after a CR with two tabs is
+        # never closed and gets its own heading gap.
+        check = import_check()
+        for line, ks in (("x\r##\t\u2028\tD-012 \u00b7 t", [1, 5]),
+                         ("x\r## \u2028 D-012 \u00b7 t", [1, 5]),
+                         ("x\r##  \u2029 \tD-012 \u00b7 t", [1, 6])):
+            with self.subTest(line=line):
+                unread = {}
+                self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                w, = unread["D-012"]
+                self.assertEqual((w.kind, sorted(w.ks)), ("heading", ks))
+                self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+        line = "## D-011 \u00b7 a\r##\t\tD-012 \u00b7 b"
+        unread = {}
+        self.assertEqual(list(check.closed_decisions("# D\n\n" + line + "\n", unread)), ["D-011"])
+        w, = unread["D-012"]
+        self.assertEqual((w.kind, sorted(w.ks)), ("heading", [12]))
+        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+
+    def test_col0_more_than_one_separator_unchanged(self):
+        # Column 0 unchanged (SPEC \u00a70, @grok 2026-11-17/18): the ledger's
+        # format is "## ", U+0020 once, then the D-number. Two spaces, two
+        # tabs, space+tab there are not closed, and no heading gap is tried.
+        check = import_check()
+        for line in ("##  D-012 \u00b7 t", "##\t\tD-012 \u00b7 t", "## \tD-012 \u00b7 t",
+                     "##\t D-012 \u00b7 t", "##" + " " * 8 + "D-012 \u00b7 t", "##\u2028  D-012 \u00b7 t"):
+            with self.subTest(line=line):
+                unread = {}
+                self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                self.assertEqual(unread, {})
+        self.assertEqual(list(check.closed_decisions("# D\n\n## D-012 \u00b7 t\n")), ["D-012"])
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_kama_cr_tab_tab_pin(self):
+        # Before (92059f2): exit 1 with only LINE BREAK naming U+000D at 1.
+        g, p = self.run_head(self.KAMA_CR_TAB_TAB)
+        self.assertEqual(p.returncode, 1)
+        rows = [l.strip() for l in g if "[UNREADABLE]" in l]
+        self.assertEqual(rows, ["[UNREADABLE] D-001: DECISIONS.md line 3: U+000D at code point 1 "
+                                "in D-001's heading"])
+        self.assertEqual([l for l in g if "[LINE BREAK]" in l], [])
 
     def test_line_breaks_asks_ks_not_cps(self):
         src = CHECK.read_text(encoding="utf-8")

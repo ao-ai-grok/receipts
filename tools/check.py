@@ -983,10 +983,13 @@ def add_unread(unread, where, line, section=None):
             where, label, section, d, "neighbour", ks, spans, cps))
 
 
-# One space or one tab after the hashes, then the D-number. Only after a CR
-# does the gate let a tab through; at column 0 it asks "## " (SPEC \u00a70; Lume
-# #forge 2026-11-16, Kama #forge 2026-11-17).
-CLOSED_HEAD = re.compile(r"##[ \t](D-[0-9]{3})" + D_AFTER + " ·", A)
+# After a CR: one or more spaces or tabs after the hashes, then the D-number,
+# as CommonMark takes them: "x", CR, "##", TAB, TAB, "D-012 \u00b7 title" renders
+# an h2 (SPEC \u00a70; Lume #forge 2026-11-16, Kama #forge 2026-11-17/18).
+# U+00A0 is not one. At column 0 the ledger's format is "## ", U+0020 once,
+# then the D-number, the closer's split: COL0_HEAD.
+CLOSED_HEAD = re.compile(r"##[ \t]+(D-[0-9]{3})" + D_AFTER + " ·", A)
+COL0_HEAD = re.compile(r"## (D-[0-9]{3})" + D_AFTER + " ·", A)
 
 
 def bad_runs(raw: bytes):
@@ -1228,7 +1231,11 @@ def closed_decisions(text, unread=None):
                 # unless the neighbour rule above already named it.
                 # m.end() counts bare from s, the skipped spaces too, so a
                 # break among them is in head, like one inside the marker.
-                m = CLOSED_HEAD.match(bare, ind)
+                # After a CR, CLOSED_HEAD takes one or more spaces or tabs
+                # after the hashes (Kama #forge 2026-11-18); at column 0,
+                # COL0_HEAD takes "## " only, unchanged.
+                head_re = CLOSED_HEAD if s else COL0_HEAD
+                m = head_re.match(bare, ind)
                 # The heading's D-number is m.group(1), read from bare,
                 # never a re-parse of line (Lume #forge 2026-11-10). The
                 # heading gap covers by index, like LINE BREAK: it names the
@@ -1242,7 +1249,7 @@ def closed_decisions(text, unread=None):
                 # (Lume #forge 2026-11-11). After a CR the heading is never
                 # closed (only one at an LF-split line's start is), so that
                 # CR is always why: head starts with it.
-                if m and (s or not CLOSED_HEAD.match(line)):
+                if m and (s or not COL0_HEAD.match(line)):
                     # Only the ones inside "## D-0NN \u00b7" are why; one after
                     # " \u00b7" is left to LINE BREAK.
                     # The gap carries the code points it names as data,
