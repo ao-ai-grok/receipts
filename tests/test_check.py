@@ -3584,6 +3584,38 @@ class LineBreakCoversByIndex(unittest.TestCase):
                                      [("DECISIONS.md line 3", "U+000D at code point 1, "
                                        "a line break to str.splitlines, not to grep -n")])
 
+    def test_cr_kama_2026_11_19_pins(self):
+        # Kama #forge 2026-11-19, pins, not a fix: the class before the hashes
+        # is U+0020 only, capped at three (bare.lstrip(" ")). Space + TAB
+        # before the hashes, or FF or VT right after them, renders no h2
+        # (markdown-it-py 4.3.0, CommonMark mode): LINE BREAK only.
+        check = import_check()
+        for line, lb in (("x\r \t## D-012 \u00b7 title", "U+000D at code point 1"),
+                         ("x\r  \t##\tD-012 \u00b7 title", "U+000D at code point 1"),
+                         ("x\r##\fD-012 \u00b7 title", "U+000D at code point 1, U+000C at code point 4"),
+                         ("x\r##\vD-012 \u00b7 title", "U+000D at code point 1, U+000B at code point 4")):
+            with self.subTest(line=repr(line)):
+                unread = {}
+                self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                self.assertEqual(unread, {})
+                self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", []),
+                                 [("DECISIONS.md line 3", lb + ", "
+                                   "a line break to str.splitlines, not to grep -n")])
+        # Her precision: FF and VT are in BREAKS, so bare drops them; "##" +
+        # FF + space + "D-012" passes the gate and gets a heading gap naming
+        # the CR and the FF, though no h2 renders (the 11/14 rule: a break
+        # inside the marker; renderer heading-ness isn't asked). Space + FF
+        # renders an h2 and names the same two.
+        for line, ks in (("x\r##\f D-012 \u00b7 title", [1, 4]),
+                         ("x\r##\v D-012 \u00b7 title", [1, 4]),
+                         ("x\r## \fD-012 \u00b7 title", [1, 5])):
+            with self.subTest(line=repr(line)):
+                unread = {}
+                self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                w, = unread["D-012"]
+                self.assertEqual((w.kind, sorted(w.ks)), ("heading", ks))
+                self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+
     def test_cr_tab_second_heading_and_breaks_in_head(self):
         # A tab heading after a CR is never closed; a break inside the
         # marker or between the hashes and the tab is in head, named once.
