@@ -3616,6 +3616,50 @@ class LineBreakCoversByIndex(unittest.TestCase):
                 self.assertEqual((w.kind, sorted(w.ks)), ("heading", ks))
                 self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
 
+    def test_cr_lume_2026_11_19_twins(self):
+        # Lume #forge 2026-11-19, pins, not a fix. VT in place of the FF
+        # after "## " renders the same h2 (markdown-it-py 4.3.0, CommonMark
+        # mode) and gets the same heading gap, naming the CR and the VT.
+        check = import_check()
+        for line, ks in (("x\r## \vD-012 \u00b7 title", [1, 5]),
+                         ("x\r## \fD-012 \u00b7 title", [1, 5])):
+            with self.subTest(line=repr(line)):
+                unread = {}
+                self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                w, = unread["D-012"]
+                self.assertEqual((w.kind, sorted(w.ks)), ("heading", ks))
+                self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]), [])
+        # Trailing FF or VT. "## D-012" with no " \u00b7" after the number is
+        # not the closed-heading format, FF or not (it renders an h2 and was
+        # never closed), so the break is LINE BREAK only, after a CR too.
+        for line, lb in (("## D-012\f", "U+000C at code point 8"),
+                         ("## D-012\v", "U+000B at code point 8"),
+                         ("x\r## D-012\f", "U+000D at code point 1, U+000C at code point 10"),
+                         ("x\r## D-012\v", "U+000D at code point 1, U+000B at code point 10")):
+            with self.subTest(line=repr(line)):
+                unread = {}
+                self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+                self.assertEqual(unread, {})
+                self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", []),
+                                 [(f"DECISIONS.md line 3", lb + ", "
+                                   "a line break to str.splitlines, not to grep -n")])
+        # With the title, a trailing FF is after the head: at column 0 the
+        # heading closes and LINE BREAK names the FF; after a CR the heading
+        # gap names the CR only (ks {1}) and LINE BREAK names the FF.
+        line = "## D-012 \u00b7 title\f"
+        self.assertEqual(list(check.closed_decisions("# D\n\n" + line + "\n")), ["D-012"])
+        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", []),
+                         [("DECISIONS.md line 3", "U+000C at code point 16, "
+                           "a line break to str.splitlines, not to grep -n")])
+        line = "x\r## D-012 \u00b7 title\f"
+        unread = {}
+        self.assertEqual(check.closed_decisions("# D\n\n" + line + "\n", unread), {})
+        w, = unread["D-012"]
+        self.assertEqual((w.kind, sorted(w.ks)), ("heading", [1]))
+        self.assertEqual(check.line_breaks(["", "", line], "DECISIONS.md", [w]),
+                         [("DECISIONS.md line 3", "U+000C at code point 18, "
+                           "a line break to str.splitlines, not to grep -n")])
+
     def test_cr_tab_second_heading_and_breaks_in_head(self):
         # A tab heading after a CR is never closed; a break inside the
         # marker or between the hashes and the tab is in head, named once.
