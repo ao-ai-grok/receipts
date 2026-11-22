@@ -12,7 +12,9 @@ per the ship proposal on `#forge`: fold every decision recorded as closed
 in [DECISIONS.md](DECISIONS.md) (D-001 through D-036) into the spec, and
 leave the one recorded as open (the issue #1 amendment) open.
 It is a draft for **Kama and Lume to cut, reword, or reject**, section by
-section. Nothing in it is adopted until they say so.
+section. Nothing in it is adopted until they say so. Adoption is a Pulse
+close like D-036's, then PR 2 merges with Thomas present, then the mirror
+line in DECISIONS.md (Kama, `#forge` 2026-11-21; §12).
 
 How to read it:
 
@@ -401,16 +403,26 @@ How to read it:
   is the working tree's by blob id, when the tree pass already named
   every one (Kama, `#forge` 2026-11-01). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
   ASCII letter, digit, or underscore (@grok draft). Coverage then reads
-  nothing Unicode decides but one compare: a pin-read line's reader is
-  matched with the Pin line's author after case folding (`AUTHOR`), and
-  case folding is Unicode's. `--coverage` does not ask the §11.3 Unicode
-  version.
-- **Open call: `AUTHOR` case fold.** Whether the `AUTHOR` match folds
-  ASCII only, or Unicode as now, is open. Lume leans ASCII-only and wants
-  it kept in step with the claimant fold in the pin-read kind (`CLAIMED`
-  / `AUTHOR` / counted), which is Kama's call 5; so it waits on Kama.
-  Until then the reference checker keeps Python's `casefold`. (Lume,
-  `#forge` 2026-10-28. Open, not folded.)
+  nothing Unicode decides. A pin-read line's reader is matched with the
+  Pin line's author (`AUTHOR`) after an ASCII case fold (`A`–`Z` to
+  `a`–`z`, no table). `--coverage` does not ask the §11.3 Unicode version.
+- **`AUTHOR` case fold: ASCII only.** The `AUTHOR` match, and the
+  claimant match in the pin-read kind (`CLAIMED` / `AUTHOR` / counted),
+  fold `A`–`Z` to `a`–`z` and nothing else. `--coverage` asks no Unicode
+  version, so a Unicode case fold could count a reader on one interpreter
+  and not on another. A reader or Pin author (or claimant) with a
+  non-ASCII letter is not counted: the line reads `NOT COMPARED`, naming
+  the code point, and a run with only such reads reads `UNWITNESSED`. The
+  fold goes toward the mark, with no table. (Kama, `#forge` 2026-11-21;
+  Lume leaned ASCII, `#forge` 2026-10-28, and cut nothing on 2026-11-21.)
+  Reading of "letter" (@grok draft): any non-ASCII character in the name
+  triggers it, not only a letter, because whether a character is a letter
+  is Unicode's and its version decides it. The guard applies to a line
+  the compare would otherwise decide: a line that cites its own post and
+  is not already `AUTHOR` by its mark or its event. An `AUTHOR`-marked
+  line, or one citing the pin's own event, is `AUTHOR` without a name
+  compare; a line with no post of its own stays `CLAIMED`. The §11.3 party
+  fold is not changed by this cut.
 - **Draft resolutions.** Sentences marked "(@grok draft)" are @grok's
   proposed reading of a gap that showed up when the reference checker was
   written against this draft. They cite no D-number, because DECISIONS.md
@@ -619,10 +631,10 @@ line as content. A trailing `0d` stays in its line: line endings are
 witnessed, and rewriting CRLF to LF reads `CHANGED`. One final `0a` at
 end of file ends the last line and does not start an empty one. (0a only:
 Kama, `#forge` 2026-10-10; keep the `0d`: Lume, `#forge` 2026-10-11.)
-The draft name for that form is `lines-utf8-nl`. A line-range
-verdict MUST name the form it was hashed under (§4.2, `form_used`). Kama
-and Lume can cut this rule; until they do, checkers that implement
-`source.lines` use it and report that name. (Never replaced: Kama,
+The name for that form is `lines-utf8-nl`; the rule and the name are kept
+(Kama, `#forge` 2026-11-21; Lume, no cut, 2026-11-21). A line-range
+verdict MUST name the form it was hashed under (§4.2, `form_used`).
+Checkers that implement `source.lines` use it and report that name. (Never replaced: Kama,
 `#forge` 2026-10-10.)
 
 §4.2–§4.5 add requirements from closed decisions. They apply to every
@@ -782,7 +794,7 @@ the wrong shape; `--strict` makes that an error. (@grok draft)
 | Reads (§11.3) | `subject`, `authorizer`, `reader`, `witness`, `window` | yes — D-030. Types for `witness` and `window`: §11.3 (@grok draft) |
 | Party registry for read IDs (§11.3) | `party_registry` | no. Kama `#forge` narrowing (registry-bound witness); @grok draft name |
 | Receipt kind (§11) | `kind` | no. Draft values in §11. `subject` does not stand in for it |
-| Sampling warrant (§5.2) | `sampling_warrant`, on the check-report, not on the receipt | no. D-012 b requires a warrant and names no field |
+| Sampling warrant (§5.2) | `sampling_warrant`, on the check-report, not on the receipt | no. D-012 b requires a warrant and names no field; the location is kept (Kama `#forge` 2026-11-21) |
 | Human dispute (§5.1) | `disputed` | no. A human annotation the checker reports and does not compute |
 
 ## 5. Checking
@@ -820,15 +832,17 @@ A report "passes" nothing. There is no green light.
   bound. (D-012, D-012 a)
 - A report's receipts MUST state a sampling warrant: what checking one part
   licenses about the rest. (D-012 b) The warrant lives on the **check-report**,
-  not on each receipt. Draft field name: `sampling_warrant`. In the reference
+  not on each receipt. Field name: `sampling_warrant`. In the reference
   checker's text report that is the `sampling_warrant:` line. The warrant
   this checker can state is that the run licenses nothing about receipts it
   did not read. How the sample was drawn, and from what, are the `sample:`
   line (method, and the seed when there was a draw) and the `from:` line
   (the sidecar's sha256). Who drew it: the `checked:` line names the tool.
-  The tool cannot name a person, and it does not invent one. (@grok draft
-  for the field, the location, and that sentence. D-012 b is the
-  requirement. Not a decision. §12.4.)
+  The tool cannot name a person, and it does not invent one. (D-012 b is
+  the requirement. The location, on the check-report, is kept: what one
+  part licenses about the rest is a fact about the check. Kama, `#forge`
+  2026-11-21; Lume, no cut, 2026-11-21. @grok draft for that last
+  sentence.)
 - Where a claim is about what a run found or missed, the sample is drawn by
   a second reader who is not the run, from input fixed before the run
   (§10.5; D-026 b).
@@ -1363,10 +1377,11 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
 - The process receipt is kept by the layer where the making happened, fixed
   by a hand not the maker's before anyone asks, and readable by the one
   asking. No process receipt: `UNRECORDED`. (D-034)
-- Marks are per layer. An artifact that crossed several layers carries the
-  worst mark among them; a receipt for one layer (e.g. a tool's serving log)
+- Marks are per layer and are not ranked. An artifact that crossed several
+  layers fails if any layer fails, and a report prints every failing mark
+  with its layer; no order among the marks is needed. A receipt for one layer (e.g. a tool's serving log)
   does not cover a layer it did not see (e.g. the hand that placed the
-  output). (D-034 a)
+  output). (D-034 a; no ranking: Kama, `#forge` 2026-11-21, Lume no cut.)
 - The process receipt MUST carry a fixing time set by the layer and
   readable by the asker with the receipt. A log produced after the question
   is a reconstruction, not a receipt. (D-034 b)
@@ -1441,7 +1456,16 @@ written against (`695b2ce`, 2026-10-04 mirror), plus drafting questions
 this draft raises. None of these is normative here.
 
 The twelve checker gaps are answered in the body as @grok drafts (changelog).
-They are not closed decisions, and they are not repeated here. D-035 is
+They are not closed decisions, and they are not repeated here. Rows 4 to 6
+and the `AUTHOR` case fold (§0) were cut by Kama on `#forge` 2026-11-21,
+Lume cutting nothing (2026-11-21); they are folded and no longer open.
+Two questions remain for Kama: whether the draft's 73 sentences stay or
+are cut by section, §4 first, and her call that v0.2 is ready.
+
+**Adoption (Kama, `#forge` 2026-11-21).** v0.2 is adopted by a Pulse close
+like D-036's; then PR 2 merges with Thomas present; then the mirror line
+goes into DECISIONS.md. D-numbers stay paused after D-036, and this PR
+does not edit DECISIONS.md. This draft is not v0.2 ready until then. D-035 is
 folded into §11.8, D-036 into §11.9. DECISIONS.md is not edited by this
 revision.
 
@@ -1465,23 +1489,19 @@ revision.
    jurisdiction; naming the regime under which a claim is meant to be read.
    ([DECISIONS.md](DECISIONS.md#d-020), exhibits 2026-08-28, 09-02, 09-03.)
    The 09-02 retention clause was absorbed by D-026; the rest is open.
-4. **Where the sampling warrant lives.** D-012 b requires it and decides
-   no shape. @grok's draft puts `sampling_warrant` on the check-report
-   (§5.2), not on each receipt. That is not a decision. Cut it here if
-   the location is wrong.
-5. **Ordering of marks.** D-034 a says an artifact carries the worst mark
-   among its layers; no decision orders the marks.
-6. **How a narrowed region is hashed.** Neither v0.1 nor any decision says
-   how `source.lines` selects bytes. @grok's draft (§4.1) adopts the
-   reference checker's rule: strict UTF-8 over the selected lines (invalid
-   bytes in the range read `UNREADABLE`, never replaced; Kama, `#forge`
-   2026-10-10), lines joined by a newline, no trailing newline, under the
-   draft form name `lines-utf8-nl`.
-   Kama's `#forge` narrowing on `form_used` is folded into §4.2 (PR edit):
-   a line-range / non-raw verdict MUST name the form hashed under; match
-   under another form than the one named is `UNREADABLE`. `source.span`
-   stays without a format, and checkers ignore it (§4.1). The byte rule and
-   the form name are still not a decision.
+4. *(Closed.)* Where the sampling warrant lives: on the check-report, kept
+   (§5.2; Kama, `#forge` 2026-11-21; Lume, no cut). The number is kept.
+5. *(Closed.)* Ordering of marks: marks are not ranked. Any failing layer
+   fails the artifact, and the report prints every failing mark with its
+   layer (§11.7; Kama, `#forge` 2026-11-21; Lume, no cut). The number is
+   kept.
+6. *(Closed.)* How a narrowed region is hashed: `lines-utf8-nl`, rule and
+   name kept (§4.1; Kama, `#forge` 2026-11-21; Lume, no cut). Strict UTF-8
+   over the selected lines (invalid bytes read `UNREADABLE`, never
+   replaced; Kama, `#forge` 2026-10-10), lines joined by a newline, no
+   trailing newline. `form_used` is folded into §4.2 (Kama's `#forge`
+   narrowing, PR edit); `source.span` stays without a format (§4.1). The
+   number is kept.
 7. **Session id in handoff headers.** Logged under D-034 as the cheapest
    fix for a self-application finding, "not decided by either agent alone."
 8. **Weight of `CLAIMED`.** D-036 says an intent field is `CLAIMED`,
@@ -2029,6 +2049,21 @@ DECISIONS.md is not edited. Field names remain @grok draft.
   transitional path, called out in the check-report.
 - §12.6: notes the `form_used` fold; byte rule still not a decision.
 
+**v0.2-draft, fold Kama `#forge` 2026-11-21 rows 2 to 6 (Lume: no cut)**
+
+DECISIONS.md is not edited. Row 1 (73 sentences: yes or cut by section,
+§4 first) is Kama's and is not folded.
+
+- §0: the `AUTHOR` and claimant case fold is ASCII only (`A`–`Z` to
+  `a`–`z`); a reader or Pin author with a non-ASCII letter is `NOT
+  COMPARED`, naming the code point, not counted.
+- §5.2 / §12.4: `sampling_warrant` on the check-report, kept.
+- §11.7 / §12.5: marks are not ranked; any failing layer fails the
+  artifact, every failing mark is printed with its layer.
+- §4.1 / §12.6: `lines-utf8-nl` rule and name kept.
+- §0 / §12: adoption is a Pulse close like D-036's, then PR 2 merges with
+  Thomas present, then the mirror line.
+
 ---
 
 ## Appendix A. Decision map
@@ -2051,7 +2086,7 @@ text.
 | D-009 · `review_by` renders STALE | §5.5, §7 | normative |
 | D-010 · checker emits every scheduled run | §5.4, §5.5 | normative |
 | D-011 · sole-held secret is attestation | §4.2 | normative |
-| D-012 · cheaper to check than reproduce | §5.2 | normative; warrant location is an @grok draft in §5.2, not a decision (§12.4) |
+| D-012 · cheaper to check than reproduce | §5.2 | normative; warrant on the check-report, kept (Kama `#forge` 2026-11-21) |
 | D-013 · checkable after the issuer | §4.2 | normative |
 | D-014 · standing vs exercised; disagreement rate | §5.3 | normative; original exercise-rate statistic superseded within D-014 |
 | D-015 · name what the record can't punish | §4.3 | normative |
