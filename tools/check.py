@@ -128,8 +128,8 @@
 # #forge 2026-10-30). §1–§11, Dropped, Appendix B, the headings and the Pin
 # line's D-numbers are read raw (no NFKC, no White_Space fold); the Pin line
 # is White_Space-folded only to find its event (Kama #forge 2026-10-30). So coverage
-# does not ask the Unicode version; its one Unicode read is the AUTHOR name
-# casefold (SPEC §0, open).
+# does not ask the Unicode version: the AUTHOR name compare folds ASCII only,
+# and a non-ASCII name is NOT COMPARED (SPEC §0; Kama #forge 2026-11-21).
 #
 # Pin (--pin ID; SPEC §0 "Pin"; Lume and Kama #forge cuts, 2026-10-05):
 # the closed set is the one the pin post lists, and the pin id is an input
@@ -875,8 +875,8 @@ def derived_marks(r, today, superseded, base: Path):
 # and "event \u0665\u0666\u0665" a pin read. Every coverage pattern is [0-9]
 # under re.ASCII (a D-number is bounded by D_BEFORE/D_AFTER below, not by
 # ASCII \b, which takes any non-ASCII character as a boundary): coverage reads nothing
-# Unicode decides but the AUTHOR name casefold in read_kind (SPEC §0), and
-# does not ask the §11.3 Unicode version.
+# Unicode decides (the AUTHOR name compare folds ASCII only, read_kind, SPEC §0),
+# and does not ask the §11.3 Unicode version.
 A = re.ASCII
 # A D-number is bounded in ASCII at both ends (SPEC §0; Kama #forge
 # 2026-10-29): ASCII \b treats any non-ASCII character as a boundary, so
@@ -1392,17 +1392,48 @@ def spec_pin_author(text):
     return strip_ws(a.group(1)) if a else None
 
 
+def ascii_name(w):
+    """A pin-read reader or the Pin author as compared: ASCII case fold only
+    (A-Z to a-z, no table), after the White_Space strip and the leading "@".
+    --coverage asks no Unicode version, so no Unicode casefold (SPEC §0; Kama
+    #forge 2026-11-21, Lume no cut)."""
+    return re.sub("[A-Z]", lambda m: m.group().lower(), strip_ws(w).lstrip("@"), flags=A)
+
+
+def non_ascii(w):
+    """Each distinct non-ASCII code point of a name, as U+XXXX, in order. Any
+    non-ASCII character, not only a letter: whether a character is a letter
+    is Unicode's, and the version decides it (@grok draft)."""
+    seen = []
+    for c in ascii_name(w):
+        if ord(c) > 0x7F and f"U+{ord(c):04X}" not in seen:
+            seen.append(f"U+{ord(c):04X}")
+    return seen
+
+
+def not_compared_why(read, author):
+    """Why a name compare isn't made: the code points, or "" when it is."""
+    parts = [f"{label} has {', '.join(cps)}"
+             for label, w in (("reader", read[0]), ("Pin author", author or ""))
+             for cps in [non_ascii(w)] if cps]
+    return "; ".join(parts)
+
+
 def read_kind(read, pin, author):
-    """counted | AUTHOR | CLAIMED for one pin-read line (SPEC §0)."""
+    """counted | AUTHOR | CLAIMED | NOT COMPARED for one pin-read line (SPEC §0).
+    NOT COMPARED here is only the name guard: the line would be counted, but
+    the reader or the Pin author has a non-ASCII character, so the AUTHOR
+    compare is not made (not_compared_why names the code point)."""
     who, ev, _, _, _, rest = read
-    # casefold is Unicode's: the one coverage read the version decides; it is
-    # not asked (SPEC §0, open).
-    name = lambda w: strip_ws(w).lstrip("@").casefold()
-    if (re.search(r"\bAUTHOR\b", who + rest, A) or ev == pin
-            or (author and name(who) == name(author))):
+    if re.search(r"\bAUTHOR\b", who + rest, A) or ev == pin:
         return AUTHOR
+    if author and not not_compared_why(read, author):
+        if ascii_name(who) == ascii_name(author):
+            return AUTHOR
     if not ev:
         return CLAIMED
+    if author and not_compared_why(read, author):
+        return NOT_COMPARED
     return COUNTED
 
 
@@ -1457,6 +1488,12 @@ def pin_read_gaps(spec_text, decisions: Path, pin, quoted, tree_printed=frozense
         tag = "" if kind == COUNTED else f" [{kind}, not counted]"
         ev = f"event {ev}" if ev else "no own post"
         who = re.sub(r"^AUTHOR:" + WS_CLASS + "*", "", who, flags=A)
+        cps = not_compared_why(read, author) if kind == NOT_COMPARED else ""
+        if cps:
+            # SPEC §0 (Kama #forge 2026-11-21): no Unicode case fold, so the name
+            # is not compared with the Pin author, and the line is not counted.
+            notes.append(f"pin read {who} ({ev}, {day}){tag}: {cps}; names compare after an "
+                         "ASCII case fold only, so this read is not compared with the Pin author")
         if text is None:
             notes.append(f"pin read {who} ({ev}, {day}){tag} against {commit}: skipped, {why}")
             continue

@@ -4,6 +4,7 @@
 # checker gap listed in PR #2 ("Spec vs checker gaps").
 
 import hashlib
+import inspect
 import os
 import shutil
 import json
@@ -3799,6 +3800,95 @@ class LineBreakCoversByIndex(unittest.TestCase):
         self.assertIn('"ks"', code)
         self.assertNotIn('"cps"', code)
         self.assertNotIn("ord(c)) not in covered", code)
+
+
+class AuthorAsciiFold(unittest.TestCase):
+    """The AUTHOR / claimant compare folds ASCII only (SPEC §0; Kama #forge
+    2026-11-21, Lume no cut): A-Z to a-z, no table. A reader or Pin author with
+    a non-ASCII character is NOT COMPARED naming the code point, not counted."""
+
+    PIN = "event 7 (@{a}, 2026-08-10): closed"
+
+    def line(self, who, ev="8"):
+        ev = f" event {ev}," if ev else ""
+        return f"- {who},{ev} 2026-08-11: pin 7 read against `abc1234`."
+
+    def kind(self, who, author, ev="8"):
+        check = import_check()
+        m = check.READ_LINE.match(self.line(who, ev))
+        return check.read_kind(m.groups(), "565", author)
+
+    def run_cover(self, who, author, ev="8", rest=""):
+        spec = SPEC.replace("event 7: closed", self.PIN.format(a=author)).replace(
+            READ, f"  - {who},{' event ' + ev + ',' if ev else ''} 2026-08-11: pin 7 read against `abc1234`{rest}.\n")
+        return PinReads().cover(spec=spec, at_commit=None)
+
+    def test_ascii_case_folds(self):
+        for who, author in (("@Kama", "kama"), ("kama", "@KAMA"), ("@LuMe", "@lUmE")):
+            with self.subTest(who=who):
+                self.assertEqual(self.kind(who, author), "AUTHOR")
+        self.assertEqual(self.kind("@kama", "lume"), "counted")
+
+    def test_unicode_only_case_equalities_are_not_compared(self):
+        # casefold said equal: KELVIN SIGN to k, sharp s to ss, dotted capital I to i + U+0307.
+        for who, author in (("@\u212Aama", "@kama"), ("@stra\u00dfe", "@STRASSE"),
+                            ("@\u0130", "@i\u0307")):
+            with self.subTest(who=who):
+                self.assertEqual(who.casefold(), author.casefold())
+                self.assertEqual(self.kind(who, author), "NOT COMPARED")
+
+    def test_pin_author_non_ascii_is_not_compared(self):
+        self.assertEqual(self.kind("@a", "@\u00e9"), "NOT COMPARED")
+        self.assertEqual(self.kind("@\u00e9", "@\u00e9"), "NOT COMPARED")  # equal, still not compared
+
+    def test_any_non_ascii_character_triggers_not_only_letters(self):
+        # Reading of "letter" (@grok draft): a digit, a quote or a space is Unicode's too.
+        for c in ("\u0663", "\u2019", "\u00a0x", "\u2603"):
+            with self.subTest(c=c):
+                self.assertEqual(self.kind("@a" + c, "@a"), "NOT COMPARED")
+
+    def test_author_mark_and_pin_event_need_no_compare(self):
+        self.assertEqual(self.kind("@\u00e9 AUTHOR:", "@a"), "AUTHOR")
+        self.assertEqual(self.kind("@\u00e9", "@a", ev="565"), "AUTHOR")
+        check = import_check()
+        m = check.READ_LINE.match("- @b, event 9, 2026-08-11: pin 7 read against `abc1234`. AUTHOR.")
+        self.assertEqual(check.read_kind(m.groups(), "565", "@\u00e9"), "AUTHOR")
+
+    def test_no_own_post_stays_claimed_and_no_author_compares_nothing(self):
+        self.assertEqual(self.kind("@\u00e9", "@a", ev=""), "CLAIMED")
+        self.assertEqual(self.kind("@a", "@a", ev=""), "AUTHOR")
+        self.assertEqual(self.kind("@\u00e9", None), "counted")
+
+    def test_code_points_are_named_in_order_once(self):
+        check = import_check()
+        self.assertEqual(check.non_ascii("@a\u00e9\u00e9\u212a"), ["U+00E9", "U+212A"])
+        self.assertEqual(check.non_ascii("@Kama"), [])
+        m = check.READ_LINE.match(self.line("@\u212Aama"))
+        self.assertEqual(check.not_compared_why(m.groups(), "@\u00e9"),
+                         "reader has U+212A; Pin author has U+00E9")
+
+    def test_cli_names_the_code_point_and_does_not_count(self):
+        p = self.run_cover("@\u212Aama", "@kama")
+        self.assertIn("[NOT COMPARED, not counted]", p.stdout)
+        self.assertIn("reader has U+212A", p.stdout)
+        self.assertIn("0 counted; 0 AUTHOR, 0 CLAIMED, 1 NOT COMPARED, not counted", p.stdout)
+        self.assertIn("[UNWITNESSED] pin quote: no counted", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_cli_pin_author_non_ascii_names_the_code_point(self):
+        p = self.run_cover("@a", "@\u00e9")
+        self.assertIn("Pin author has U+00E9", p.stdout)
+        self.assertIn("1 NOT COMPARED", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_cli_ascii_case_variant_is_author_not_counted(self):
+        p = self.run_cover("@KAMA", "@kama")
+        self.assertIn("1 AUTHOR", p.stdout)
+        self.assertNotIn("1 NOT COMPARED", p.stdout)
+
+    def test_source_has_no_casefold_in_the_author_compare(self):
+        code = inspect.getsource(import_check().read_kind) + inspect.getsource(import_check().ascii_name)
+        self.assertNotIn(".casefold(", code)
 
 
 if __name__ == "__main__":
