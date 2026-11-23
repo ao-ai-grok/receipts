@@ -129,8 +129,8 @@ How to read it:
   `#forge` 2026-10-30.) One rule for a D-number's neighbours wherever it
   sits: coverage reads §1–§11, the Dropped list, Appendix B, the
   DECISIONS.md headings and the Pin line's D-numbers as raw lines, not
-  NFKC-folded and not White_Space-folded, so U+00A0 beside a D-number
-  reads nothing anywhere. The Pin line is White_Space-folded (§4.1 set)
+  NFKC-folded and not whitespace-folded, so U+00A0 beside a D-number
+  reads nothing anywhere. The Pin line is whitespace-folded (§4.1 list)
   only to find its event; its D-numbers are read in a separate pass over
   the raw line, never by position from the folded one, since a fold that
   changes length would name the wrong character. So `**Pin.** event 5 …
@@ -401,7 +401,9 @@ How to read it:
   commit the spans are named on the `PIN READ DRIFT` line, or as
   `UNREADABLE` gaps of the pin quote, unless that commit's DECISIONS.md
   is the working tree's by blob id, when the tree pass already named
-  every one (Kama, `#forge` 2026-11-01). Pin-read lines are read after the White_Space fold. Other coverage numbers end at any character that is not an
+  every one (Kama, `#forge` 2026-11-01). Pin-read lines are read after the
+  whitespace fold (§4.1 list). Other coverage numbers end at any character
+  that is not an
   ASCII letter, digit, or underscore (@grok draft). Coverage then reads
   nothing Unicode decides. A pin-read line's reader is matched with the
   Pin line's author (`AUTHOR`) after an ASCII case fold (`A`–`Z` to
@@ -411,14 +413,15 @@ How to read it:
   fold `A`–`Z` to `a`–`z` and nothing else. `--coverage` asks no Unicode
   version, so a Unicode case fold could count a reader on one interpreter
   and not on another. A reader or Pin author (or claimant) with a
-  non-ASCII letter is not counted: the line reads `NOT COMPARED`, naming
+  non-ASCII character is not counted: the line reads `NOT COMPARED`, naming
   the code point, and a run with only such reads reads `UNWITNESSED`. The
   fold goes toward the mark, with no table. (Kama, `#forge` 2026-11-21;
   Lume leaned ASCII, `#forge` 2026-10-28, and cut nothing on 2026-11-21.)
-  Reading of "letter" (@grok draft): any non-ASCII character in the name
-  triggers it, not only a letter, because whether a character is a letter
-  is Unicode's and its version decides it. The guard applies to a line
-  the compare would otherwise decide: a line that cites its own post and
+  Any non-ASCII character in the name triggers it, not only a letter:
+  whether a character is a letter needs a Unicode version, and whether it
+  is ASCII does not (kept, `U+212A` the pin: Kama, `#forge` 2026-11-22;
+  Lume, no cut, 2026-11-22). The guard applies to a line the compare
+  would otherwise decide: a line that cites its own post and
   is not already `AUTHOR` by its mark or its event. An `AUTHOR`-marked
   line, or one citing the pin's own event, is `AUTHOR` without a name
   compare; a line with no post of its own stays `CLAIMED`. The §11.3 party
@@ -428,7 +431,10 @@ How to read it:
   written against this draft. They cite no D-number, because DECISIONS.md
   does not record them, and they are not adopted. Kama and Lume cut them
   the same way as the rest. The citation rule above does not flag a
-  sentence marked "(@grok draft)".
+  sentence marked "(@grok draft)". Kama said yes to the 16 in §4, with
+  two narrowings (§4.1 whitespace, §4.2 read-nothing), and those now cite
+  her post (`#forge` 2026-11-22); §4.6's names stay draft names. The marks
+  left are for her pass by section, §5 next (§12).
 - **`#forge` PR edits.** Where Kama (or Lume) agrees a cut on `#forge` and
   says it is a PR edit rather than a new decision, this draft folds the
   cut and cites it as a Kama `#forge` narrowing with the date, marked PR
@@ -533,7 +539,8 @@ line's top-level object is depth 1, and an array or object inside one at
 depth d is at depth d+1. Strings, numbers, `true`, `false` and `null` add
 nothing, and a bracket inside a string is not a bracket. A checker MUST
 read depth 64 and MUST make depth 65 an error, whatever its parser's own
-limit. (Counting rule: @grok draft.) (Inline and embedded formats may come later; the sidecar keeps the
+limit. (Counting rule: Kama, `#forge` 2026-11-22; Lume, no cut, 2026-11-22.)
+(Inline and embedded formats may come later; the sidecar keeps the
 spec independent of the report's own format.)
 
 ### 4.1 Core fields (v0.1, plus draft resolutions on span and sha256)
@@ -562,8 +569,8 @@ spec independent of the report's own format.)
 | `claim_at` | no | Locator of the claim inside the report (anchor, line, section). |
 | `source.uri` | yes | Pointer to the raw source. Relative path, URL, or URN. |
 | `source.lines` | no | Narrows the pointer to a line range. See below for which bytes that range is. A receipt that points at "the whole log" when the claim rests on ten lines is a weak receipt. |
-| `source.span` | no | No format yet. A checker MUST ignore it, MUST still check the receipt, and MUST say in the check-report that it ignored the span. It MUST NOT treat the span as a narrowing, and this draft invents no span syntax. (@grok draft) |
-| `source.sha256` | recommended | Hash of the bytes the checker actually hashes: the narrowed region when a narrowing was applied, otherwise the whole source. `source.lines`, when present, is a narrowing the checker applies. `source.span` is not applied, so it does not narrow the hash. The hash is also what survives when the source disappears. (@grok draft, on which bytes; the field itself is v0.1.) |
+| `source.span` | no | No format yet. A checker MUST ignore it, MUST still check the receipt, and MUST say in the check-report that it ignored the span. It MUST NOT treat the span as a narrowing, and this draft invents no span syntax. (Kama, `#forge` 2026-11-22; Lume, no cut, 2026-11-22.) |
+| `source.sha256` | recommended | Hash of the bytes the checker actually hashes: the narrowed region when a narrowing was applied, otherwise the whole source. `source.lines`, when present, is a narrowing the checker applies. `source.span` is not applied, so it does not narrow the hash. The hash is also what survives when the source disappears. (Which bytes: Kama, `#forge` 2026-11-22; Lume, no cut, 2026-11-22. The field itself is v0.1.) |
 | `derivation` | no | One line: how the claim was computed from the source. The difference between "trust me" and "check me." |
 | `author` | yes | Who signs this receipt — the issuer. For agents: an identity that traces to a responsible operator. |
 | `date` | yes | ISO date the receipt was written. |
@@ -578,10 +585,14 @@ enough. (Kama, `#forge` 2026-10-16.) `id`, `claim`, and `author` are also
 non-empty and not only whitespace. `""`, or a string that is only
 whitespace, is an error naming the line and the field. An author who names
 nobody is a claim with no one behind it. (Kama, `#forge` 2026-10-18.)
-Whitespace here is the Unicode `White_Space` set: `09`–`0d`, `20`, U+0085,
-U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000.
-(@grok draft.) It is the one definition of whitespace in this draft: the
-registry's edge-whitespace rule (§11.3) uses the same set. `1c`–`1f` are
+Whitespace here is this list, and only this list: `09`–`0d`, `20`,
+U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F,
+U+3000 (25 code points). It is the list, not a Unicode property, so no
+Unicode version changes it; the reference checker freezes the same 25.
+(Kama, `#forge` 2026-11-22; Lume, no cut, 2026-11-22; "this list", not a
+property name: Kama.) It is the one
+definition of whitespace in this draft: the registry's edge-whitespace
+rule (§11.3) uses the same list. `1c`–`1f` are
 not in it, though Python's `str.isspace` counts them, so a registry line
 ending in `1f` is not edge whitespace, just as an `author` of only `1f` is
 not only whitespace. (One set, not two: Kama, `#forge` 2026-10-19.)
@@ -589,7 +600,8 @@ not only whitespace. (One set, not two: Kama, `#forge` 2026-10-19.)
 control (U+0000–U+001F) or DEL (U+007F) anywhere in one is an error naming
 the line and the field. That includes `09`, `0a`, and `0d`, so a tab or a
 line break inside a claim is an error too. (C0: Kama, `#forge`
-2026-10-19. DEL: @grok draft. It is the one ASCII control outside C0, and
+2026-10-19. DEL: Kama, `#forge` 2026-11-22; Lume, no cut. It is the one
+ASCII control outside C0, and
 it prints nothing a reader can check. C1, U+0080–U+009F, is not cut here.)
 The claim has no exception for tab or line breaks. A claim with a line
 break is two claims: mark the parts, not the sentence (D-027), so two
@@ -606,12 +618,13 @@ sign, no leading zero, no whitespace, `A` at least 1, and `B` not below
 an error naming the line and the field, before any source is read. It is
 an error in the receipt, not a verdict on the source.
 (Type cut: Kama, `#forge` 2026-10-18. The `sha256` and `lines` shapes:
-@grok draft.)
+Kama, `#forge` 2026-11-22; Lume, no cut, 2026-11-22.)
 
 Unknown fields MUST be preserved by tools and ignored by checkers that do
 not implement them.
 
-**Line-range bytes** (@grok draft). Neither v0.1 nor any decision says how
+**Line-range bytes** (Kama, `#forge` 2026-11-22; Lume, no cut, 2026-11-22).
+Neither v0.1 nor any decision says how
 `source.lines` selects bytes. So two checkers can disagree and both look
 conformant. This draft adopts the reference checker's existing rule, and
 no other: `source.lines` is `A-B` or `A`, 1-based and inclusive (shape:
@@ -649,13 +662,14 @@ receipt unless the rule says when it applies.
   `raw-bytes`. A hash proves those bytes did not change; it does not prove
   two readers see the same text. (D-020, exhibit of 2026-09-05, recorded as
   settled by three parties. The requirement is that exhibit. The token
-  `raw-bytes` is @grok draft, not a decision.)
+  `raw-bytes` is @grok's, kept: Kama, `#forge` 2026-11-22; Lume, no cut,
+  2026-11-22; not a D-number.)
 - A checker that cannot reproduce a declared canonical form other than
   `raw-bytes` MUST NOT report `OK` for that receipt. It reports
   `UNREADABLE`: the source was dereferenced, and the declared form could
   not be reproduced. `UNREADABLE` is a draft name. The issue #1 amendment
   that proposed it is still open (§12.1), so the name is not adopted.
-  (@grok draft)
+  (Kama, `#forge` 2026-11-22; Lume, no cut, 2026-11-22.)
 - **`form_used` for line-range and other non-raw hashes.** A verdict that
   hashes under a line-range narrowing, or under any form other than
   whole-source `raw-bytes`, MUST name the form those bytes were taken
@@ -667,7 +681,8 @@ receipt unless the rule says when it applies.
   `source.canonical` other than the whole-source default MAY supply the
   named form for this rule; when neither names a form and a non-raw
   narrowing applies, the checker reports `UNREADABLE` (undeclared form),
-  not `OK`. (@grok draft field names; Kama `#forge` narrowing, 2026-09-29 /
+  not `OK`. (Field names: @grok's, kept as draft names, Kama, `#forge`
+  2026-11-22; Kama `#forge` narrowing, 2026-09-29 /
   2026-09-30 / 2026-10-01; PR edit, not a new D-number.)
 - **Match under the wrong form is not a pass.** If the named form is one
   the checker can apply and the hash does not match under that form, but
@@ -681,14 +696,19 @@ receipt unless the rule says when it applies.
   was dereferenced and then could not be read as declared. A remote URI
   (a URL, or a URN) that this checker never retrieved is a different fact.
   The verdict is `UNFETCHED`: this checker did not fetch the source, so it
-  did not check it. `UNFETCHED` is a draft name. (@grok draft)
+  did not check it. `UNFETCHED` is a draft name. (Kama, `#forge` 2026-11-22;
+  Lume, no cut, 2026-11-22.)
 - **A run that read nothing is not a pass.** If every receipt the run
   actually checked has verdict `UNREADABLE` or `UNFETCHED`, and none is
   `OK`, the checker MUST exit non-zero and MUST print a diagnostic line
   that it read no source. That line is the run's result, not a quiet
   header above a pass. A run that also has `OK`, `CHANGED`, or `MISSING`
   does not add this diagnostic; those verdicts stand on their own.
-  (@grok draft)
+  An empty sidecar never reaches this rule: zero bytes, or a lone `0a`,
+  is an empty line 1, already an error naming line 1 (§4), so a run that
+  gets here checked at least one receipt. (Kama, `#forge` 2026-11-22; Lume,
+  no cut, 2026-11-22. The empty-sidecar
+  clause: Kama, `#forge` 2026-11-22.)
 - **Carried vs pointed.** A receipt MUST state which evidence it carries
   and which it points at. What a sample needs to be checked SHOULD be
   carried; the rest MAY be pointed at. The sampling warrant (§5.2) is the
@@ -762,8 +782,10 @@ receipt unless the rule says when it applies.
 ### 4.6 Draft field names (@grok's proposal, not an adopted decision)
 
 This table was a suggestion. It is now @grok's **draft normative names**,
-still for Kama and Lume to rename or cut. No row here is an adopted
-decision just because it is in the table. Rows marked "yes" use a name
+still for Kama and Lume to rename or cut. Kama said yes to them as drafts
+(`#forge` 2026-11-22; Lume, no cut, 2026-11-22): they stay draft names,
+not adopted. No row here is an adopted decision just because it is in
+the table. Rows marked "yes" use a name
 that already appears in a decision; the others do not.
 
 A checker MAY warn when a receipt lacks a name this table requires of
@@ -774,12 +796,13 @@ is not an error by default, so a v0.1 sidecar still checks. A checker
 MUST NOT reject a receipt for lacking a name that only some receipts
 carry (`continuity`, `commitment`, `review_conditions`, `kind`, the read
 fields, `unclassified`). It MAY warn when a field that is present has
-the wrong shape; `--strict` makes that an error. (@grok draft)
+the wrong shape; `--strict` makes that an error. (Kama, `#forge` 2026-11-22;
+Lume, no cut, 2026-11-22.)
 
 | Requirement | Suggested field | Name from a decision? |
 |---|---|---|
 | Canonical form (§4.2) | `source.canonical` | yes — Issue #1 current state |
-| Form hashed under, for line-range / non-raw (§4.2) | `source.form_used` on the receipt; `form_used` on the verdict / check-report | no. Kama `#forge` narrowing; @grok draft names |
+| Form hashed under, for line-range / non-raw (§4.2) | `source.form_used` on the receipt; `form_used` on the verdict / check-report | no. Kama `#forge` narrowing; @grok's draft names, kept as drafts (Kama `#forge` 2026-11-22) |
 | Carried vs pointed (§4.2) | `carried` / `pointed` (lists of evidence) | no |
 | Relation of each name (§4.3) | `parties[]` with `did` and `answers_for` | no |
 | Performer (§4.3) | `performer` | "performer" is the decision's word; field name no |
@@ -791,8 +814,8 @@ the wrong shape; `--strict` makes that an error. (@grok draft)
 | Schema (§4.5) | `schema` | no |
 | Review date and conditions (§7) | `review_by`, `review_conditions` | `review_by` yes; conditions no |
 | Unclassified slot (§10) | `unclassified` | yes — D-025 |
-| Reads (§11.3) | `subject`, `authorizer`, `reader`, `witness`, `window` | yes — D-030. Types for `witness` and `window`: §11.3 (@grok draft) |
-| Party registry for read IDs (§11.3) | `party_registry` | no. Kama `#forge` narrowing (registry-bound witness); @grok draft name |
+| Reads (§11.3) | `subject`, `authorizer`, `reader`, `witness`, `window` | yes — D-030. Types for `witness` and `window`: §11.3, marked a draft there for the §11 pass; this row kept (Kama `#forge` 2026-11-22) |
+| Party registry for read IDs (§11.3) | `party_registry` | no. Kama `#forge` narrowing (registry-bound witness); @grok's draft name, kept as a draft (Kama `#forge` 2026-11-22) |
 | Receipt kind (§11) | `kind` | no. Draft values in §11. `subject` does not stand in for it |
 | Sampling warrant (§5.2) | `sampling_warrant`, on the check-report, not on the receipt | no. D-012 b requires a warrant and names no field; the location is kept (Kama `#forge` 2026-11-21) |
 | Human dispute (§5.1) | `disputed` | no. A human annotation the checker reports and does not compute |
@@ -1211,8 +1234,8 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   it reads the line, so an unstable compare form is reported with its line
   and field even where no compare runs (@grok draft). Blank to a space,
   after NFKC and before `fold_ws`, holds (Lume, `#forge` 2026-10-27).
-- **Blank list.** Characters that render blank but are neither
-  `White_Space` nor `Default_Ignorable_Code_Point`. The list is this
+- **Blank list.** Characters that render blank but are neither in the
+  §4.1 whitespace list nor `Default_Ignorable_Code_Point`. The list is this
   spec's own, and growing it is a spec change: U+2800 BRAILLE PATTERN
   BLANK. (Lume, `#forge` 2026-10-23; Kama, `#forge` 2026-10-24.) That a
   blank becomes a space rather than being dropped: @grok draft.
@@ -1238,7 +1261,7 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   stays in its line; each line is strict UTF-8; a leading BOM is an error on
   line 1. An identifier is its line exactly. Nothing is stripped, and a line
   that begins or ends with whitespace (a trailing `0d` included) is an error
-  naming the line. Whitespace is the §4.1 `White_Space` set, the same one
+  naming the line. Whitespace is the §4.1 list, the same one
   `id`, `claim`, and `author` are checked against (Kama, `#forge`
   2026-10-19). Any such error is a registry that cannot be read, and the
   reason names the registry line. (Kama's registry cut, `#forge`
@@ -1460,7 +1483,11 @@ They are not closed decisions, and they are not repeated here. Rows 4 to 6
 and the `AUTHOR` case fold (§0) were cut by Kama on `#forge` 2026-11-21,
 Lume cutting nothing (2026-11-21); they are folded and no longer open.
 Two questions remain for Kama: whether the draft's 73 sentences stay or
-are cut by section, §4 first, and her call that v0.2 is ready.
+are cut by section, and her call that v0.2 is ready. §4 is done: yes to
+its 16, with two narrowings (§4.1 "this list", not Unicode's
+`White_Space`; §4.2 an empty sidecar never reaches the read-nothing
+rule), §4.6's names kept as drafts, and the §0 non-ASCII reading kept
+(Kama, `#forge` 2026-11-22; Lume, no cut, 2026-11-22). §5 is next.
 
 **Adoption (Kama, `#forge` 2026-11-21).** v0.2 is adopted by a Pulse close
 like D-036's; then PR 2 merges with Thomas present; then the mirror line
@@ -2064,6 +2091,25 @@ DECISIONS.md is not edited. Row 1 (73 sentences: yes or cut by section,
 - §0 / §12: adoption is a Pulse close like D-036's, then PR 2 merges with
   Thomas present, then the mirror line.
 
+**v0.2-draft, fold Kama `#forge` 2026-11-22 row 1, §4 (Lume: no cut)**
+
+DECISIONS.md is not edited. Row 1 by section: §4 done, §5 next (3
+marks); 46 draft marks remain above §13.
+
+- §4: yes to all 16 marks (preamble 1, §4.1 6, §4.2 5, §4.6 4); each
+  now cites Kama, `#forge` 2026-11-22. `UNREADABLE` and `UNFETCHED` stay
+  draft names; §4.6's names stay draft names, not adopted.
+- §4.1: whitespace is "this list", the 25 code points written out, not
+  Unicode's `White_Space`, so no version is invited; the list matches
+  the checker's frozen set code point for code point. The §0, §11.3 and
+  Appendix B pointers say "§4.1 list".
+- §4.2: an empty sidecar (zero bytes or a lone `0a`) never reaches the
+  read-nothing rule: an empty line 1 is already an error naming line 1.
+- §0: any non-ASCII character, not only a letter, is `NOT COMPARED`,
+  naming the code point; kept, `U+212A` the pin. "non-ASCII letter"
+  reads "non-ASCII character".
+- §12: row 1 says §4 is done, §5 next.
+
 ---
 
 ## Appendix A. Decision map
@@ -2137,7 +2183,8 @@ still history in DECISIONS.md, and each still has its source in Appendix B.
 ## Appendix B. Fold sources
 
 The **Source:** line of each closed entry in DECISIONS.md, quoted verbatim
-(whitespace folded; whitespace is the §4.1 set) at `695b2ce`. The `#forge` posts a §1–§11 citation
+(whitespace folded; whitespace is the §4.1 list) at `695b2ce`. The `#forge`
+posts a §1–§11 citation
 folds are these. DECISIONS.md wins on any difference;
 `tools/check.py --coverage` reports one.
 
