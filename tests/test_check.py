@@ -1404,6 +1404,54 @@ class OneWhitespaceSet(unittest.TestCase):
                 self.assertEqual([l for l in code if re.search(pattern, l)], [])
 
 
+class WhitespaceIsThisList(unittest.TestCase):
+    """Kama #forge 2026-11-22: §4.1 whitespace is "this list", not Unicode's
+    White_Space; the checker freezes it. The list written in SPEC §4.1 and
+    the checker's set are the same code points, and neither names a
+    property."""
+
+    def spec_list(self):
+        import re
+        text = " ".join((ROOT / "SPEC.md").read_text(encoding="utf-8").split())
+        m = re.search(r"Whitespace here is this list, and only this list: (.*?) \((\d+) code points\)", text)
+        self.assertIsNotNone(m, "SPEC §4.1 list sentence not found")
+        cp = r"(?:`([0-9a-f]{2})`|U\+([0-9A-F]{4}))"
+        points, rest = set(), m.group(1)
+        for m1, m2, m3, m4 in re.findall(cp + "–" + cp, rest):
+            points.update(range(int(m1 or m2, 16), int(m3 or m4, 16) + 1))
+        rest = re.sub(cp + "–" + cp, "", rest)
+        for m1, m2 in re.findall(cp, rest):
+            points.add(int(m1 or m2, 16))
+        return points, int(m.group(2))
+
+    def test_spec_list_equals_checker_set(self):
+        points, stated = self.spec_list()
+        frozen = {ord(c) for c in import_check().WHITE_SPACE}
+        self.assertEqual(points, frozen)
+        self.assertEqual(stated, len(frozen))
+        self.assertEqual(len(frozen), 25)
+
+    def test_spec_section_4_names_no_property(self):
+        text = (ROOT / "SPEC.md").read_text(encoding="utf-8")
+        body = text[text.index("## 4. The receipt record"):text.index("## 5. Checking")]
+        self.assertNotIn("White_Space", body)
+
+
+class EmptySidecarIsLine1(unittest.TestCase):
+    """SPEC §4.2 (Kama #forge 2026-11-22): an empty sidecar never reaches
+    the read-nothing rule. Zero bytes, or a lone 0a, is an empty line 1,
+    an error in load_receipts, before any receipt is checked."""
+
+    def test_zero_bytes_and_lone_0a(self):
+        for body in (b"", b"\n"):
+            with self.subTest(body=body):
+                p = run(body)
+                self.assertIn("error: line 1 is empty", p.stderr)
+                self.assertNotIn("read no source", p.stdout + p.stderr)
+                self.assertNotIn("receipts check", p.stdout)
+                self.assertNotEqual(p.returncode, 0)
+
+
 class Gap10NewRequiredFields(unittest.TestCase):
     def test_missing_v02_fields_warn_by_default(self):
         p = run([receipt("r-1", v02=False, sha256=sha(RAW))])

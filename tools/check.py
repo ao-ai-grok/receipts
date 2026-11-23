@@ -69,7 +69,7 @@
 #          The registry is read as the sidecar is (bytes, 0a only, strict
 #          UTF-8, BOM an error, Kama registry cut 2026-10-12); an id is its
 #          line exactly, and edge whitespace (a trailing 0d too) is an error
-#          naming the line; whitespace is the §4.1 White_Space set that
+#          naming the line; whitespace is the §4.1 list (25 code points) that
 #          id, claim, author use, not isspace (Kama #forge 2026-10-19).
 #          An id line with a C0 control or DEL is an error naming the line
 #          (Kama #forge 2026-10-20). Any such error: registry cannot be read.
@@ -126,8 +126,8 @@
 # point, "D-035 followed by U+00A0" (Lume #forge 2026-10-29), and every such
 # D-number is its own UNREADABLE gap with line and code point (Kama, Lume
 # #forge 2026-10-30). §1–§11, Dropped, Appendix B, the headings and the Pin
-# line's D-numbers are read raw (no NFKC, no White_Space fold); the Pin line
-# is White_Space-folded only to find its event (Kama #forge 2026-10-30). So coverage
+# line's D-numbers are read raw (no NFKC, no whitespace fold); the Pin line
+# is whitespace-folded (§4.1 list) only to find its event (Kama #forge 2026-10-30). So coverage
 # does not ask the Unicode version: the AUTHOR name compare folds ASCII only,
 # and a non-ASCII name is NOT COMPARED (SPEC §0; Kama #forge 2026-11-21).
 #
@@ -344,7 +344,9 @@ def nested_deeper_than(line: str, limit: int = MAX_DEPTH) -> bool:
     return False
 
 
-# Unicode White_Space (§4.1, @grok draft): what "only whitespace" means.
+# The §4.1 whitespace list: what "only whitespace" means. "This list", not
+# Unicode's White_Space property, so no Unicode version moves it: 25 code
+# points, frozen here (Kama #forge 2026-11-22).
 # The one whitespace this checker knows (Kama #forge 2026-10-19: one set, not
 # two). Python's str.isspace, str.strip(), str.split() and re's \s also count
 # 1c-1f, so none of them is used: the registry edge rule, id/claim/author,
@@ -589,6 +591,9 @@ def load_receipts(path: Path):
     decode, JSON is strict: no duplicate keys, no NaN/Infinity, object only
     (Kama, #forge 2026-10-14). id, claim, author are strings and date is
     YYYY-MM-DD, checked before ids are compared (Kama, #forge 2026-10-16).
+    An empty sidecar (zero bytes, or a lone 0a) is an empty line 1 and an
+    error here, so main's read-nothing rule never sees an empty run
+    (SPEC §4.2; Kama, #forge 2026-11-22).
     """
     receipts, notes, seen = [], [], {}
     data = path.read_bytes()
