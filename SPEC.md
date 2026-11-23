@@ -2094,7 +2094,9 @@ DECISIONS.md is not edited. Row 1 (73 sentences: yes or cut by section,
 **v0.2-draft, fold Kama `#forge` 2026-11-22 row 1, §4 (Lume: no cut)**
 
 DECISIONS.md is not edited. Row 1 by section: §4 done, §5 next (3
-marks); 46 draft marks remain above §13.
+marks); 44 draft marks remain above §13. (The 73 was every occurrence
+of the mark in the file: 60 marks above §13, 2 quotes of the mark in
+§0's reading notes, and 11 in this changelog.)
 
 - §4: yes to all 16 marks (preamble 1, §4.1 6, §4.2 5, §4.6 4); each
   now cites Kama, `#forge` 2026-11-22. `UNREADABLE` and `UNFETCHED` stay
