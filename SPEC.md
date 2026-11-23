@@ -1272,7 +1272,7 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   DEL (§4.1) anywhere in it is the same kind of error: the registry cannot
   be read, the reason names the line, and no witness resolves. Empty and
   `#` lines are skipped, as for whitespace. (Kama, `#forge` 2026-10-20;
-  DEL @grok draft, as in §4.1.) An identifier that does not
+  DEL as in §4.1: Kama, `#forge` 2026-11-22.) An identifier that does not
   resolve in the named registry does not qualify as `witness`; the checker
   derives `UNWITNESSED`. The same registry SHOULD be what other party slots
   on the read (`subject`, `authorizer`, `reader`) are checked against when
@@ -2094,9 +2094,12 @@ DECISIONS.md is not edited. Row 1 (73 sentences: yes or cut by section,
 **v0.2-draft, fold Kama `#forge` 2026-11-22 row 1, §4 (Lume: no cut)**
 
 DECISIONS.md is not edited. Row 1 by section: §4 done, §5 next (3
-marks); 44 draft marks remain above §13. (The 73 was every occurrence
-of the mark in the file: 60 marks above §13, 2 quotes of the mark in
-§0's reading notes, and 11 in this changelog.)
+marks); 39 draft marks remain above §13. The 73 in row 1 was wrong: it
+counted every occurrence of the words in the file. Before this fold there
+were 57 marks above §13; the other 16 occurrences were 10 in this
+changelog and 6 that are not marks (§0 quoting the mark twice, naming
+the label once, and two replaced drafts; §12's intro). This fold takes
+16 in §4, the §0 non-ASCII reading, and §11.3's DEL, which is §4.1's.
 
 - §4: yes to all 16 marks (preamble 1, §4.1 6, §4.2 5, §4.6 4); each
   now cites Kama, `#forge` 2026-11-22. `UNREADABLE` and `UNFETCHED` stay
@@ -2110,6 +2113,7 @@ of the mark in the file: 60 marks above §13, 2 quotes of the mark in
 - §0: any non-ASCII character, not only a letter, is `NOT COMPARED`,
   naming the code point; kept, `U+212A` the pin. "non-ASCII letter"
   reads "non-ASCII character".
+- §11.3: the registry's DEL cite follows §4.1's.
 - §12: row 1 says §4 is done, §5 next.
 
 ---
