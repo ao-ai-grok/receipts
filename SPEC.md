@@ -433,8 +433,10 @@ How to read it:
   the same way as the rest. The citation rule above does not flag a
   sentence marked "(@grok draft)". Kama said yes to the 16 in §4, with
   two narrowings (§4.1 whitespace, §4.2 read-nothing), and those now cite
-  her post (`#forge` 2026-11-22); §4.6's names stay draft names. The marks
-  left are for her pass by section, §5 next (§12).
+  her post (`#forge` 2026-11-22); §4.6's names stay draft names. She
+  said yes to the 3 in §5, with two narrowings on `disputed` (§5.1), and
+  those now cite her post (`#forge` 2026-11-23). The marks left are for
+  her pass by section (§12).
 - **`#forge` PR edits.** Where Kama (or Lume) agrees a cut on `#forge` and
   says it is a PR edit rather than a new decision, this draft folds the
   cut and cites it as a Kama `#forge` narrowing with the date, marked PR
@@ -841,7 +843,7 @@ A checker:
 | `OK` | Source dereferenced; hash matches (if present); claim is consistent with source on inspection. |
 | `CHANGED` | Source dereferenced but its content no longer matches `sha256`. The receipt pointed at something that has since moved. |
 | `MISSING` | Source cannot be dereferenced. A dangling receipt (§7). |
-| `DISPUTED` | A human mark, not a machine verdict. The source may be intact and the human judges the claim unsupported. A program MUST NOT compute it. If a receipt carries `disputed` as `true` or as a non-empty string (the human's reason), the checker reports that mark as written and does not judge the claim. `disputed: false` or an empty string is not a mark. (@grok draft) |
+| `DISPUTED` | A human mark, not a machine verdict. The source may be intact and the human judges the claim unsupported. A program MUST NOT compute it. If a receipt carries `disputed` as `true` or as a non-empty string (the human's reason), the checker reports that mark as written and does not judge the claim. A string of only whitespace (§4.1 list) is still a mark, with no reason given; it is printed as `true` is. `disputed: false` or an empty string is not a mark. `disputed` as a number or as `null` is an error naming the line and the field, before any source is read, not a quiet no-mark: the fold goes toward a mark, never away from one. (Kama, `#forge` 2026-11-23; Lume, no reply.) An array or an object is the same error (@grok draft). The checker reports `DISPUTED` as written; it cannot say whose hand wrote it, and it does not guess one. (Kama's reading, `#forge` 2026-11-23.) |
 | `UNREADABLE` | Source was dereferenced, but the declared / named form is not one this checker can reproduce under the name given; or a non-raw / line-range hash had no named form (`form_used`); or the hash matches only under a form other than the one named; or the selected lines are not valid UTF-8 under `lines-utf8-nl` (§4.1). Not `OK`. Draft name (§4.2; Kama `#forge` narrowing on `form_used`). |
 | `UNFETCHED` | This checker did not fetch the source (a URL or a URN). Not `MISSING` (the source is not known to be gone) and not `UNREADABLE` (nothing was dereferenced). Draft name (§4.2). |
 
@@ -864,8 +866,8 @@ A report "passes" nothing. There is no green light.
   The tool cannot name a person, and it does not invent one. (D-012 b is
   the requirement. The location, on the check-report, is kept: what one
   part licenses about the rest is a fact about the check. Kama, `#forge`
-  2026-11-21; Lume, no cut, 2026-11-21. @grok draft for that last
-  sentence.)
+  2026-11-21; Lume, no cut, 2026-11-21. That last sentence: Kama,
+  `#forge` 2026-11-23; Lume, no reply.)
 - Where a claim is about what a run found or missed, the sample is drawn by
   a second reader who is not the run, from input fixed before the run
   (§10.5; D-026 b).
@@ -928,7 +930,8 @@ artifact is missing. They share one rule:
   `WITNESSED`, and `CLAIMED` — MUST be reported at the same weight as
   `MISSING`: as a failing check, not a footnote. (D-009, D-028, D-029,
   D-030, D-031, D-032, D-033, D-034, D-035, D-036) (`CLAIMED` as
-  non-failing: @grok draft, §12.8.)
+  non-failing: Kama, `#forge` 2026-11-23, the §12.8 call: quiet,
+  counted, printed. Lume, no reply.)
 
 | Mark | Emitted when | Section | From |
 |---|---|---|---|
@@ -1487,7 +1490,13 @@ are cut by section, and her call that v0.2 is ready. §4 is done: yes to
 its 16, with two narrowings (§4.1 "this list", not Unicode's
 `White_Space`; §4.2 an empty sidecar never reaches the read-nothing
 rule), §4.6's names kept as drafts, and the §0 non-ASCII reading kept
-(Kama, `#forge` 2026-11-22; Lume, no cut, 2026-11-22). §5 is next.
+(Kama, `#forge` 2026-11-22; Lume, no cut, 2026-11-22). §5 is done: yes
+to its 3, with two narrowings on `disputed` (only whitespace is still a
+mark; a number or `null` is an error), and one clause on whose hand
+(Kama, `#forge` 2026-11-23; Lume, no reply). 37 draft marks remain above
+§13: §0 12, §5 1 (new: an array or object `disputed` is an error too),
+§6 2, §7 5, §9 1, §11 16. Kama named §10 next; §10 carries no mark, and
+§8 none, so §6, §7 and §9 come first, then §11. §12 carries none.
 
 **Adoption (Kama, `#forge` 2026-11-21).** v0.2 is adopted by a Pulse close
 like D-036's; then PR 2 merges with Thomas present; then the mirror line
@@ -1545,7 +1554,8 @@ revision.
    record the call, so it is recorded here, not folded as normative text.
    It waits until a decision names the intent fields: the reference
    checker computes no intent marks yet (§11.9), so there is no count to
-   print.
+   print. Kama (`#forge` 2026-11-23) said yes to §5.5's `CLAIMED` as
+   non-failing, the same call.
    Kama (`#forge` 2026-10-07): it stays where it is. D-numbers are paused
    after D-036; it moves when a decision names the intent fields.
 9. **Fold-source granularity.** Lume's cut asks that each line carry the
@@ -2115,6 +2125,25 @@ the label once, and two replaced drafts; §12's intro). This fold takes
   reads "non-ASCII character".
 - §11.3: the registry's DEL cite follows §4.1's.
 - §12: row 1 says §4 is done, §5 next.
+
+**v0.2-draft, fold Kama `#forge` 2026-11-23 row 1, §5 (Lume: no reply)**
+
+DECISIONS.md is not edited. Row 1 by section: §5 done. 37 draft marks
+remain above §13 (39, less §5's 3, plus 1 new in §5.1). Kama named §10
+next; §10 has no mark, so §6 (2), §7 (5) and §9 (1) are next, then §11
+(16); §0 has 12.
+
+- §5.1 `DISPUTED`: yes. A string of only whitespace (§4.1 list) is
+  still a mark, no reason given, printed as `true` is. `disputed` as a
+  number or `null` is an error naming the line and the field, not a
+  quiet no-mark. The reference checker did neither before: both read no
+  mark. An array or an object is the same error (new @grok draft, for
+  her). An empty string is still not a mark, as before.
+- §5.1: the checker reports `DISPUTED` as written and cannot say whose
+  hand wrote it (Kama's reading, one clause).
+- §5.2: "The tool cannot name a person, and it does not invent one." Yes.
+- §5.5 / §12.8: `CLAIMED` as non-failing. Yes.
+- §0 / §12: row 1 says §5 is done, with the count by section.
 
 ---
 
