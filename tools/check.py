@@ -35,7 +35,12 @@
 #          output says so.
 #   §5.1   machine verdicts OK / CHANGED / MISSING. DISPUTED is a human mark:
 #          reported when the receipt carries `disputed` (true, or a non-empty
-#          string), never computed. Not part of machine core.
+#          string; a string of only whitespace is a mark with no reason,
+#          printed as true), never computed. Not part of machine core.
+#          false or "" is no mark; any other type (number, null, array,
+#          object) is an error naming the line and the field (Kama #forge
+#          2026-11-23; array/object @grok draft). Reported as written: the
+#          checker cannot say whose hand wrote it.
 #   §4.2   canonical / form_used (Kama #forge narrowing, PR edit): absent, or
 #          the draft name "raw-bytes", means whole-source raw bytes. Known
 #          forms this tool can reproduce: raw-bytes and lines-utf8-nl (the
@@ -543,6 +548,12 @@ def check_field_types(r, n):
     if not ymd_ok(r["date"]):
         shown = repr(r["date"]) if isinstance(r["date"], str) else json_type(r["date"])
         sys.exit(f"error: receipt on line {n} field 'date' is {shown}, not a YYYY-MM-DD date")
+    # Kama #forge 2026-11-23: disputed as a number or null is a type error,
+    # not a quiet no-mark; fold toward a mark, never away from one. An array
+    # or an object is the same error (@grok draft). Absent is no mark.
+    if "disputed" in r and not isinstance(r["disputed"], (bool, str)):
+        sys.exit(f"error: receipt on line {n} field 'disputed' is {json_type(r['disputed'])}, "
+                 "not a boolean or a string")
     target = r.get("supersedes")
     if target is not None and not isinstance(target, str):
         sys.exit(f"error: receipt on line {n} field 'supersedes' is {json_type(target)}, "
@@ -1685,12 +1696,18 @@ def coverage_main(spec: Path, decisions: Path, pin=None):
 
 
 def human_dispute(r):
-    """DISPUTED is reported when a human wrote it. Never computed (§5.1)."""
+    """DISPUTED is reported when a human wrote it. Never computed (§5.1).
+
+    Reported as written: the checker cannot say whose hand wrote it. A string
+    of only whitespace (§4.1 list) is still a mark, with no reason given, and
+    prints as true does (Kama, #forge 2026-11-23). false and "" are no mark.
+    Other types never reach here: check_field_types stops on them."""
     mark = r.get("disputed")
     if mark is True:
         return "human mark, not computed"
-    if isinstance(mark, str) and strip_ws(mark):
-        return "human mark, not computed: " + strip_ws(mark)
+    if isinstance(mark, str) and mark != "":
+        reason = strip_ws(mark)
+        return "human mark, not computed" + (": " + reason if reason else "")
     return None
 
 

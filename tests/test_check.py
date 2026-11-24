@@ -1510,6 +1510,51 @@ class KindAndDispute(unittest.TestCase):
         self.assertNotIn("DISPUTED", p.stdout)
         self.assertEqual(p.returncode, 0)
 
+    def test_disputed_true_is_a_mark_with_no_reason(self):
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": True}])
+        self.assertIn("[DISPUTED] r-1: human mark, not computed\n", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_disputed_empty_string_is_not_a_mark(self):
+        # SPEC §5.1: false or an empty string is not a mark (unchanged).
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": ""}])
+        self.assertNotIn("DISPUTED", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_disputed_only_whitespace_is_still_a_mark_printed_as_true(self):
+        # Kama #forge 2026-11-23: a string of only whitespace is still a mark,
+        # just with no reason given; print it as true. Fold toward a mark.
+        # §4.1 list, so U+3000 and a tab count as whitespace.
+        for value in (" ", "   ", "\t", "\u3000", " \u00a0 "):
+            with self.subTest(value=value):
+                p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": value}])
+                self.assertIn("[  OK   ] r-1", p.stdout)
+                self.assertIn("[DISPUTED] r-1: human mark, not computed\n", p.stdout)
+                self.assertEqual(p.returncode, 1)
+
+    def test_disputed_reason_is_trimmed_of_edge_whitespace(self):
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": "  overreaches  "}])
+        self.assertIn("[DISPUTED] r-1: human mark, not computed: overreaches\n", p.stdout)
+
+    def test_disputed_number_or_null_is_a_type_error_not_no_mark(self):
+        # Kama #forge 2026-11-23: a number or null is a type error, not quietly
+        # no mark. Array and object the same (@grok draft). Before any source.
+        cases = ((0, "a number"), (1, "a number"), (1.5, "a number"),
+                 (None, "null"), ([], "an array"), (["x"], "an array"),
+                 ({}, "an object"))
+        for value, name in cases:
+            with self.subTest(value=value):
+                p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": value}])
+                self.assertEqual(p.returncode, 1)
+                self.assertIn(f"error: receipt on line 1 field 'disputed' is {name}, "
+                              "not a boolean or a string", p.stderr)
+                self.assertNotIn("[  OK   ]", p.stdout)
+
+    def test_absent_disputed_is_not_a_mark(self):
+        p = run([receipt("r-1", sha256=sha(RAW))])
+        self.assertNotIn("DISPUTED", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
     def test_sampling_warrant_is_on_the_report(self):
         p = run([receipt("r-1", sha256=sha(RAW))])
         self.assertIn("sampling_warrant: this run licenses nothing about receipts it did not read", p.stdout)
