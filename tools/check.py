@@ -34,13 +34,19 @@
 #          the whole source. source.span has no format and is ignored; the
 #          output says so.
 #   §5.1   machine verdicts OK / CHANGED / MISSING. DISPUTED is a human mark:
-#          reported when the receipt carries `disputed` (true, or a non-empty
-#          string; a string of only whitespace is a mark with no reason,
-#          printed as true), never computed. Not part of machine core.
-#          false or "" is no mark; any other type (number, null, array,
-#          object) is an error naming the line and the field (Kama #forge
-#          2026-11-23; array/object @grok draft). Reported as written: the
+#          reported when the receipt carries `disputed` (true, or any
+#          string; "" or a string of only whitespace is a mark with no
+#          reason, printed as true), never computed. Not part of machine
+#          core. false or an absent field is no mark; any other type
+#          (number, null, array, object) is an error naming the line and
+#          the field (Kama #forge 2026-11-23/24). Reported as written: the
 #          checker cannot say whose hand wrote it.
+#   §4.1   every receipt string the checker prints takes the control rule
+#          (Kama #forge 2026-11-24): id, claim, disputed, derivation,
+#          supersedes, party_registry, source.uri, source.form_used,
+#          source.canonical, source.span, and the §11.3 party slots; author
+#          too. A C0 control or DEL in one is an error naming the line and
+#          the field, before any source is read.
 #   §4.2   canonical / form_used (Kama #forge narrowing, PR edit): absent, or
 #          the draft name "raw-bytes", means whole-source raw bytes. Known
 #          forms this tool can reproduce: raw-bytes and lines-utf8-nl (the
@@ -550,7 +556,7 @@ def check_field_types(r, n):
         sys.exit(f"error: receipt on line {n} field 'date' is {shown}, not a YYYY-MM-DD date")
     # Kama #forge 2026-11-23: disputed as a number or null is a type error,
     # not a quiet no-mark; fold toward a mark, never away from one. An array
-    # or an object is the same error (@grok draft). Absent is no mark.
+    # or an object is the same error (Kama #forge 2026-11-24). Absent is no mark.
     if "disputed" in r and not isinstance(r["disputed"], (bool, str)):
         sys.exit(f"error: receipt on line {n} field 'disputed' is {json_type(r['disputed'])}, "
                  "not a boolean or a string")
@@ -558,6 +564,28 @@ def check_field_types(r, n):
     if target is not None and not isinstance(target, str):
         sys.exit(f"error: receipt on line {n} field 'supersedes' is {json_type(target)}, "
                  "not a string or null")
+
+
+# Kama #forge 2026-11-24: every receipt string the checker prints takes the
+# §4.1 control rule, said once. A reason with a line break is two reasons; a
+# line break in any printed string could fake a report line. id, claim,
+# author and the party slots are refused in check_field_types; these are the
+# rest, each refused when it is a string (other types are cut elsewhere, or
+# not printed). source.lines, date and review_by are shape-checked, so a
+# control cannot reach the report through them.
+PRINTED_STRINGS = (("disputed",), ("derivation",), ("supersedes",), ("party_registry",),
+                   ("source", "uri"), ("source", "form_used"), ("source", "canonical"),
+                   ("source", "span"))
+
+
+def refuse_printed_controls(r, n):
+    """§4.1 control rule on every other receipt string the checker prints."""
+    for path in PRINTED_STRINGS:
+        value = r
+        for key in path:
+            value = value.get(key) if isinstance(value, dict) else None
+        if isinstance(value, str):
+            refuse_control(value, n, ".".join(path))
 
 
 SHA256_HEX = re.compile(r"[0-9a-f]{64}")
@@ -627,6 +655,7 @@ def load_receipts(path: Path):
         if not uri or not isinstance(uri, str):
             sys.exit(f"error: receipt on line {n} missing required field 'source.uri'")
         check_source_types(r, n)
+        refuse_printed_controls(r, n)
         if r["id"] in seen:
             sys.exit(f"error: receipt on line {n} reuses id '{r['id']}' from line {seen[r['id']]}")
         seen[r["id"]] = n
@@ -1700,12 +1729,14 @@ def human_dispute(r):
 
     Reported as written: the checker cannot say whose hand wrote it. A string
     of only whitespace (§4.1 list) is still a mark, with no reason given, and
-    prints as true does (Kama, #forge 2026-11-23). false and "" are no mark.
-    Other types never reach here: check_field_types stops on them."""
+    prints as true does (Kama, #forge 2026-11-23). "" is a mark too, printed
+    as true is: nobody reading the sidecar can tell it from " " (Kama, #forge
+    2026-11-24). Only false, or no field at all, is not a mark. Other types
+    never reach here, nor a control: load_receipts stops on them."""
     mark = r.get("disputed")
     if mark is True:
         return "human mark, not computed"
-    if isinstance(mark, str) and mark != "":
+    if isinstance(mark, str):
         reason = strip_ws(mark)
         return "human mark, not computed" + (": " + reason if reason else "")
     return None

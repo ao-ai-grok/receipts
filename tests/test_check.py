@@ -1515,17 +1515,23 @@ class KindAndDispute(unittest.TestCase):
         self.assertIn("[DISPUTED] r-1: human mark, not computed\n", p.stdout)
         self.assertEqual(p.returncode, 1)
 
-    def test_disputed_empty_string_is_not_a_mark(self):
-        # SPEC §5.1: false or an empty string is not a mark (unchanged).
+    def test_disputed_empty_string_is_a_mark_printed_as_true(self):
+        # Kama #forge 2026-11-24: " " makes a mark and "" didn't, and nobody
+        # reading the sidecar can see the difference. "" is a mark too,
+        # printed as true is. Only false, or no field at all, is not a mark.
+        # On 79f642b "" read no mark, exit 0.
         p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": ""}])
-        self.assertNotIn("DISPUTED", p.stdout)
-        self.assertEqual(p.returncode, 0)
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertIn("[DISPUTED] r-1: human mark, not computed\n", p.stdout)
+        self.assertEqual(p.returncode, 1)
 
     def test_disputed_only_whitespace_is_still_a_mark_printed_as_true(self):
         # Kama #forge 2026-11-23: a string of only whitespace is still a mark,
         # just with no reason given; print it as true. Fold toward a mark.
-        # §4.1 list, so U+3000 and a tab count as whitespace.
-        for value in (" ", "   ", "\t", "\u3000", " \u00a0 "):
+        # §4.1 list, so U+3000 and U+2003 count as whitespace. A tab did too
+        # until Kama #forge 2026-11-24: 09 is C0, so it is now an error
+        # (PrintedStringsTakeControlRule).
+        for value in (" ", "   ", "\u2003", "\u3000", " \u00a0 "):
             with self.subTest(value=value):
                 p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": value}])
                 self.assertIn("[  OK   ] r-1", p.stdout)
@@ -1558,6 +1564,76 @@ class KindAndDispute(unittest.TestCase):
     def test_sampling_warrant_is_on_the_report(self):
         p = run([receipt("r-1", sha256=sha(RAW))])
         self.assertIn("sampling_warrant: this run licenses nothing about receipts it did not read", p.stdout)
+
+
+class PrintedStringsTakeControlRule(unittest.TestCase):
+    """Kama #forge 2026-11-24: disputed takes the §4.1 control rule as written
+    for claim; a reason with a line break is two reasons. Said once: every
+    receipt string the checker prints takes that rule. On 79f642b a reason
+    with 0a printed raw and could fake a report line; so could a source.uri,
+    a derivation or a dangling supersedes."""
+
+    def assertNamed(self, p, line, field, what):
+        self.assertIn(f"error: receipt on line {line} field '{field}' {what}", p.stderr)
+        self.assertNotIn("[  OK   ]", p.stdout)
+        self.assertNotIn("DISPUTED", p.stdout)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertEqual(p.returncode, 1)
+
+    def test_disputed_reason_with_0a_is_an_error(self):
+        p = run([receipt("r-1", sha256=sha(RAW)),
+                 {**receipt("r-2", sha256=sha(RAW)), "disputed": "one\n  [  OK   ] r-9: fake"}])
+        self.assertNamed(p, 2, "disputed", "contains control character U+000A at index 3")
+
+    def test_disputed_reason_with_0d_is_an_error(self):
+        p = run([receipt("r-1", sha256=sha(RAW)),
+                 {**receipt("r-2", sha256=sha(RAW)), "disputed": "one\rtwo"}])
+        self.assertNamed(p, 2, "disputed", "contains control character U+000D at index 3")
+
+    def test_disputed_every_c0_and_del(self):
+        for cp in [*range(0x20), 0x7F]:
+            with self.subTest(cp=hex(cp)):
+                p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": "x" + chr(cp)}])
+                self.assertNamed(p, 1, "disputed", f"contains control character U+{cp:04X} at index 1")
+
+    def test_disputed_only_c0_whitespace_is_an_error_not_a_mark(self):
+        # 09-0d are in the §4.1 whitespace list and are C0: the control rule
+        # wins, so "\t" is an error naming the field (was a mark at 79f642b).
+        for value in ("\t", "\n", " \r "):
+            with self.subTest(value=value):
+                p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": value}])
+                self.assertIn("error: receipt on line 1 field 'disputed' contains control character", p.stderr)
+                self.assertEqual(p.returncode, 1)
+
+    def test_disputed_c1_is_not_cut(self):  # §4.1: C1 is not cut here
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": "a\x85b"}])
+        self.assertIn("[DISPUTED] r-1: human mark, not computed: a\x85b", p.stdout)
+        self.assertEqual(p.returncode, 1)
+
+    def test_every_other_printed_string(self):
+        cases = (("derivation", lambda r, v: {**r, "derivation": v}),
+                 ("supersedes", lambda r, v: {**r, "supersedes": v}),
+                 ("party_registry", lambda r, v: {**r, "party_registry": v}),
+                 ("source.uri", lambda r, v: {**r, "source": {**r["source"], "uri": v}}),
+                 ("source.form_used", lambda r, v: {**r, "source": {**r["source"], "form_used": v}}),
+                 ("source.canonical", lambda r, v: {**r, "source": {**r["source"], "canonical": v}}),
+                 ("source.span", lambda r, v: {**r, "source": {**r["source"], "span": v}}))
+        for field, put in cases:
+            for ch in "\n\r\x7f":
+                with self.subTest(field=field, ch=hex(ord(ch))):
+                    bad = put(receipt("r-2", sha256=sha(RAW)), "raw" + ch + ".txt")
+                    p = run([receipt("r-1", sha256=sha(RAW)), bad])
+                    self.assertIn(f"error: receipt on line 2 field '{field}' contains control "
+                                  f"character U+{ord(ch):04X} at index 3", p.stderr)
+                    self.assertNotIn("[  OK   ]", p.stdout)
+                    self.assertEqual(p.returncode, 1)
+
+    def test_printed_strings_without_controls_still_check(self):
+        r = {**receipt("r-1", sha256=sha(RAW)), "derivation": "wc -l raw.txt",
+             "source": {"uri": "raw.txt", "sha256": sha(RAW), "span": "a b"}}
+        p = run([r])
+        self.assertIn("[  OK   ] r-1", p.stdout)
+        self.assertEqual(p.returncode, 0)
 
 
 class KindsFromLaterFolds(unittest.TestCase):
