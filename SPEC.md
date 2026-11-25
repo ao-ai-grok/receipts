@@ -435,8 +435,11 @@ How to read it:
   two narrowings (§4.1 whitespace, §4.2 read-nothing), and those now cite
   her post (`#forge` 2026-11-22); §4.6's names stay draft names. She
   said yes to the 3 in §5, with two narrowings on `disputed` (§5.1), and
-  those now cite her post (`#forge` 2026-11-23). The marks left are for
-  her pass by section (§12).
+  those now cite her post (`#forge` 2026-11-23). She said yes to the one
+  that added (an array or object `disputed` is an error), folded the
+  empty string toward the mark, and cut the control rule for every
+  printed receipt string (§4.1, §5.1; `#forge` 2026-11-24). The marks
+  left are for her pass by section, §6 next (§12).
 - **`#forge` PR edits.** Where Kama (or Lume) agrees a cut on `#forge` and
   says it is a PR edit rather than a new decision, this draft folds the
   cut and cites it as a Kama `#forge` narrowing with the date, marked PR
@@ -608,6 +611,21 @@ it prints nothing a reader can check. C1, U+0080–U+009F, is not cut here.)
 The claim has no exception for tab or line breaks. A claim with a line
 break is two claims: mark the parts, not the sentence (D-027), so two
 lines are two receipts. (Kama, `#forge` 2026-10-20.)
+
+The control rule is said once: every receipt string the checker prints
+takes it, not only those three. (Kama, `#forge` 2026-11-24; Lume, no
+reply.) In the reference checker those are `id`, `claim`, the `disputed`
+reason (§5.1), `derivation`, `supersedes` (§6), `source.uri`,
+`source.form_used`, `source.canonical`, `source.span`, `party_registry`,
+and the four §11.3 party slots. `author` takes it too, though it is not
+printed. Each is refused when it is a string; other types are cut where
+the field is cut, or are not printed. `source.sha256`, `source.lines`,
+`date` and `review_by` have a fixed shape, so no control reaches the
+report through them. A line break in any printed string can fake a line
+of the check-report: a reason with a line break is two reasons, as a claim
+with one is two claims. Extending the rule breaks nothing at the tip: the
+example sidecar carries no control in any of these, and the coverage run
+(§0) reads no sidecar.
 
 The same type rule covers the fields a checker reads to reach a verdict.
 `source.sha256`, when present, is a string of 64 lowercase hex digits.
@@ -843,7 +861,7 @@ A checker:
 | `OK` | Source dereferenced; hash matches (if present); claim is consistent with source on inspection. |
 | `CHANGED` | Source dereferenced but its content no longer matches `sha256`. The receipt pointed at something that has since moved. |
 | `MISSING` | Source cannot be dereferenced. A dangling receipt (§7). |
-| `DISPUTED` | A human mark, not a machine verdict. The source may be intact and the human judges the claim unsupported. A program MUST NOT compute it. If a receipt carries `disputed` as `true` or as a non-empty string (the human's reason), the checker reports that mark as written and does not judge the claim. A string of only whitespace (§4.1 list) is still a mark, with no reason given; it is printed as `true` is. `disputed: false` or an empty string is not a mark. `disputed` as a number or as `null` is an error naming the line and the field, before any source is read, not a quiet no-mark: the fold goes toward a mark, never away from one. (Kama, `#forge` 2026-11-23; Lume, no reply.) An array or an object is the same error (@grok draft). The checker reports `DISPUTED` as written; it cannot say whose hand wrote it, and it does not guess one. (Kama's reading, `#forge` 2026-11-23.) |
+| `DISPUTED` | A human mark, not a machine verdict. The source may be intact and the human judges the claim unsupported. A program MUST NOT compute it. If a receipt carries `disputed` as `true` or as a string (the human's reason), the checker reports that mark as written and does not judge the claim. An empty string, or a string of only whitespace (§4.1 list), is still a mark, with no reason given; it is printed as `true` is. Only `disputed: false`, or no field at all, is not a mark: a single space makes a mark, and nobody reading the sidecar can tell an empty string from it. (Kama, `#forge` 2026-11-23; the empty string: Kama, `#forge` 2026-11-24; Lume, no reply.) `disputed` as a number, `null`, an array or an object is an error naming the line and the field, before any source is read, not a quiet no-mark: the fold goes toward a mark, never away from one. (Kama, `#forge` 2026-11-23; array and object: Kama, `#forge` 2026-11-24.) A reason takes the §4.1 control rule as written for `claim`: a C0 control (U+0000–U+001F) or DEL (U+007F) anywhere in it is an error naming the line and the field. A reason with a line break is two reasons. `09`–`0d` are C0, so a reason of only tabs or line breaks is that error too, not a mark. (Kama, `#forge` 2026-11-24; said once, for every printed receipt string, in §4.1.) The checker reports `DISPUTED` as written; it cannot say whose hand wrote it, and it does not guess one. (Kama's reading, `#forge` 2026-11-23; yes, `#forge` 2026-11-24.) |
 | `UNREADABLE` | Source was dereferenced, but the declared / named form is not one this checker can reproduce under the name given; or a non-raw / line-range hash had no named form (`form_used`); or the hash matches only under a form other than the one named; or the selected lines are not valid UTF-8 under `lines-utf8-nl` (§4.1). Not `OK`. Draft name (§4.2; Kama `#forge` narrowing on `form_used`). |
 | `UNFETCHED` | This checker did not fetch the source (a URL or a URN). Not `MISSING` (the source is not known to be gone) and not `UNREADABLE` (nothing was dereferenced). Draft name (§4.2). |
 
@@ -1493,10 +1511,17 @@ rule), §4.6's names kept as drafts, and the §0 non-ASCII reading kept
 (Kama, `#forge` 2026-11-22; Lume, no cut, 2026-11-22). §5 is done: yes
 to its 3, with two narrowings on `disputed` (only whitespace is still a
 mark; a number or `null` is an error), and one clause on whose hand
-(Kama, `#forge` 2026-11-23; Lume, no reply). 37 draft marks remain above
-§13: §0 12, §5 1 (new: an array or object `disputed` is an error too),
-§6 2, §7 5, §9 1, §11 16. Kama named §10 next; §10 carries no mark, and
-§8 none, so §6, §7 and §9 come first, then §11. §12 carries none.
+(Kama, `#forge` 2026-11-23; Lume, no reply). §5's last mark is done: an
+array or object `disputed` is the same error, yes; the empty string is a
+mark, printed as `true` is; every receipt string the checker prints takes
+the §4.1 control rule (Kama, `#forge` 2026-11-24; Lume, no reply). 36
+draft marks remain above §13: §0 12, §6 2, §7 5, §9 1, §11 16; §5, §8,
+§10 and §12 carry none. §6 is next (Kama, `#forge` 2026-11-24), then §7
+and §9, then §11. Open from that fold, for her, not drafted: C1
+(U+0080–U+009F, including U+0085) and U+2028/U+2029 are not cut by the
+control rule, so a printed string can still carry a line break some
+readers render; and `derivation` has no type rule, so a non-string one
+prints as the checker's language renders it.
 
 **Adoption (Kama, `#forge` 2026-11-21).** v0.2 is adopted by a Pulse close
 like D-036's; then PR 2 merges with Thomas present; then the mirror line
@@ -2144,6 +2169,26 @@ next; §10 has no mark, so §6 (2), §7 (5) and §9 (1) are next, then §11
 - §5.2: "The tool cannot name a person, and it does not invent one." Yes.
 - §5.5 / §12.8: `CLAIMED` as non-failing. Yes.
 - §0 / §12: row 1 says §5 is done, with the count by section.
+
+**v0.2-draft, fold Kama `#forge` 2026-11-24 row 1, §5's open row (Lume: no reply)**
+
+DECISIONS.md is not edited. §5 carries no mark now. 36 draft marks
+remain above §13 (37, less the one in §5.1): §0 12, §6 2, §7 5, §9 1,
+§11 16. §6 is next.
+
+- §5.1 `DISPUTED`: an array or an object is the same error as a number
+  or `null`. Yes; the sentence now cites her post.
+- §5.1: `""` is a mark, printed as `true` is. Only `false`, or no field
+  at all, is not a mark. A single space made a mark and nothing didn't,
+  and no reader of the sidecar can see the difference.
+- §5.1 / §4.1: a `disputed` reason takes the §4.1 control rule as
+  written for `claim`; a C0 control or DEL anywhere in it is an error
+  naming the line and the field. Said once in §4.1, for every receipt
+  string the checker prints, listed there. A reason of only tabs or line
+  breaks was a mark and is now that error.
+- §5.1: whose hand clause: yes.
+- §12: C1 and U+2028/U+2029 in printed strings, and `derivation`'s type,
+  left open for her, not drafted.
 
 ---
 
