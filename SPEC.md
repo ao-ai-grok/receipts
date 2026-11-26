@@ -438,8 +438,11 @@ How to read it:
   those now cite her post (`#forge` 2026-11-23). She said yes to the one
   that added (an array or object `disputed` is an error), folded the
   empty string toward the mark, and cut the control rule for every
-  printed receipt string (§4.1, §5.1; `#forge` 2026-11-24). The marks
-  left are for her pass by section, §6 next (§12).
+  printed receipt string (§4.1, §5.1; `#forge` 2026-11-24). She cut the
+  two rows that fold left open: C1, U+2028 and U+2029 take the same
+  control rule, and `derivation` is a string or absent (§4.1, §5.1;
+  `#forge` 2026-11-25). The marks left are for her pass by section, §6
+  next (§12).
 - **`#forge` PR edits.** Where Kama (or Lume) agrees a cut on `#forge` and
   says it is a PR edit rather than a new decision, this draft folds the
   cut and cites it as a Kama `#forge` narrowing with the date, marked PR
@@ -583,7 +586,10 @@ spec independent of the report's own format.)
 
 **Field types.** `id`, `claim`, and `author` are JSON strings. `date` is a
 calendar date `YYYY-MM-DD` and nothing else (the same test as `review_by`,
-§7). `supersedes`, when present, is a string or null. Any other type is an
+§7). `supersedes`, when present, is a string or null. `derivation` is a
+string or absent; `null`, a number, a boolean, an array or an object is
+an error naming the line and the field, the same fold as `disputed`
+(§5.1) (Kama, `#forge` 2026-11-25; Lume, no reply). Any other type is an
 error naming the line and the field, checked before ids are compared, so
 `1` and `"1"` are never two ids that print the same. Presence alone is not
 enough. (Kama, `#forge` 2026-10-16.) `id`, `claim`, and `author` are also
@@ -602,20 +608,27 @@ not in it, though Python's `str.isspace` counts them, so a registry line
 ending in `1f` is not edge whitespace, just as an `author` of only `1f` is
 not only whitespace. (One set, not two: Kama, `#forge` 2026-10-19.)
 `id`, `claim`, and `author` also contain no control character: a C0
-control (U+0000–U+001F) or DEL (U+007F) anywhere in one is an error naming
+control (U+0000–U+001F), DEL (U+007F), a C1 control (U+0080–U+009F,
+U+0085 among them), U+2028 or U+2029 anywhere in one is an error naming
 the line and the field. That includes `09`, `0a`, and `0d`, so a tab or a
 line break inside a claim is an error too. (C0: Kama, `#forge`
 2026-10-19. DEL: Kama, `#forge` 2026-11-22; Lume, no cut. It is the one
 ASCII control outside C0, and
-it prints nothing a reader can check. C1, U+0080–U+009F, is not cut here.)
+it prints nothing a reader can check. C1, U+2028 and U+2029: Kama,
+`#forge` 2026-11-25; Lume, no reply. U+0085 is a line break in some
+readers, and U+2028 and U+2029 are line breaks by name: a string that can
+start a new line in any reader can fake a line of the check-report.)
+These 67 code points (32 C0, DEL, 32 C1, U+2028, U+2029) are the control
+rule, one rule, wherever this draft says "the §4.1 control rule".
 The claim has no exception for tab or line breaks. A claim with a line
 break is two claims: mark the parts, not the sentence (D-027), so two
 lines are two receipts. (Kama, `#forge` 2026-10-20.)
 
 The control rule is said once: every receipt string the checker prints
-takes it, not only those three. (Kama, `#forge` 2026-11-24; Lume, no
-reply.) In the reference checker those are `id`, `claim`, the `disputed`
-reason (§5.1), `derivation`, `supersedes` (§6), `source.uri`,
+takes it, not only those three, C1, U+2028 and U+2029 included. (Kama,
+`#forge` 2026-11-24 and 2026-11-25; Lume, no reply.) In the reference
+checker those are `id`, `claim`, the `disputed` reason (§5.1),
+`derivation`, `supersedes` (§6), `source.uri`,
 `source.form_used`, `source.canonical`, `source.span`, `party_registry`,
 and the four §11.3 party slots. `author` takes it too, though it is not
 printed. Each is refused when it is a string; other types are cut where
@@ -624,8 +637,8 @@ the field is cut, or are not printed. `source.sha256`, `source.lines`,
 report through them. A line break in any printed string can fake a line
 of the check-report: a reason with a line break is two reasons, as a claim
 with one is two claims. Extending the rule breaks nothing at the tip: the
-example sidecar carries no control in any of these, and the coverage run
-(§0) reads no sidecar.
+example sidecar carries no control in any of these (C1, U+2028 and U+2029
+included), and the coverage run (§0) reads no sidecar.
 
 The same type rule covers the fields a checker reads to reach a verdict.
 `source.sha256`, when present, is a string of 64 lowercase hex digits.
@@ -861,7 +874,7 @@ A checker:
 | `OK` | Source dereferenced; hash matches (if present); claim is consistent with source on inspection. |
 | `CHANGED` | Source dereferenced but its content no longer matches `sha256`. The receipt pointed at something that has since moved. |
 | `MISSING` | Source cannot be dereferenced. A dangling receipt (§7). |
-| `DISPUTED` | A human mark, not a machine verdict. The source may be intact and the human judges the claim unsupported. A program MUST NOT compute it. If a receipt carries `disputed` as `true` or as a string (the human's reason), the checker reports that mark as written and does not judge the claim. An empty string, or a string of only whitespace (§4.1 list), is still a mark, with no reason given; it is printed as `true` is. Only `disputed: false`, or no field at all, is not a mark: a single space makes a mark, and nobody reading the sidecar can tell an empty string from it. (Kama, `#forge` 2026-11-23; the empty string: Kama, `#forge` 2026-11-24; Lume, no reply.) `disputed` as a number, `null`, an array or an object is an error naming the line and the field, before any source is read, not a quiet no-mark: the fold goes toward a mark, never away from one. (Kama, `#forge` 2026-11-23; array and object: Kama, `#forge` 2026-11-24.) A reason takes the §4.1 control rule as written for `claim`: a C0 control (U+0000–U+001F) or DEL (U+007F) anywhere in it is an error naming the line and the field. A reason with a line break is two reasons. `09`–`0d` are C0, so a reason of only tabs or line breaks is that error too, not a mark. (Kama, `#forge` 2026-11-24; said once, for every printed receipt string, in §4.1.) The checker reports `DISPUTED` as written; it cannot say whose hand wrote it, and it does not guess one. (Kama's reading, `#forge` 2026-11-23; yes, `#forge` 2026-11-24.) |
+| `DISPUTED` | A human mark, not a machine verdict. The source may be intact and the human judges the claim unsupported. A program MUST NOT compute it. If a receipt carries `disputed` as `true` or as a string (the human's reason), the checker reports that mark as written and does not judge the claim. An empty string, or a string of only whitespace (§4.1 list), is still a mark, with no reason given; it is printed as `true` is. Only `disputed: false`, or no field at all, is not a mark: a single space makes a mark, and nobody reading the sidecar can tell an empty string from it. (Kama, `#forge` 2026-11-23; the empty string: Kama, `#forge` 2026-11-24; Lume, no reply.) `disputed` as a number, `null`, an array or an object is an error naming the line and the field, before any source is read, not a quiet no-mark: the fold goes toward a mark, never away from one. (Kama, `#forge` 2026-11-23; array and object: Kama, `#forge` 2026-11-24.) A reason takes the §4.1 control rule as written for `claim`: a C0 control (U+0000–U+001F), DEL (U+007F), a C1 control (U+0080–U+009F), U+2028 or U+2029 anywhere in it is an error naming the line and the field. A reason with a line break is two reasons. `09`–`0d`, U+0085, U+2028 and U+2029 are in the control rule, so a reason of only tabs or line breaks is that error too, not a mark: an error is louder than a mark, so nothing goes quiet. Spaces alone (U+0020, U+00A0, U+3000 and the rest of the §4.1 list outside the control rule) stay a mark, printed as `true`. (Kama, `#forge` 2026-11-24; tabs or line breaks only an error, spaces alone a mark: yes, Kama, `#forge` 2026-11-25; C1, U+2028, U+2029: Kama, `#forge` 2026-11-25; said once, for every printed receipt string, in §4.1.) The checker reports `DISPUTED` as written; it cannot say whose hand wrote it, and it does not guess one. (Kama's reading, `#forge` 2026-11-23; yes, `#forge` 2026-11-24.) |
 | `UNREADABLE` | Source was dereferenced, but the declared / named form is not one this checker can reproduce under the name given; or a non-raw / line-range hash had no named form (`form_used`); or the hash matches only under a form other than the one named; or the selected lines are not valid UTF-8 under `lines-utf8-nl` (§4.1). Not `OK`. Draft name (§4.2; Kama `#forge` narrowing on `form_used`). |
 | `UNFETCHED` | This checker did not fetch the source (a URL or a URN). Not `MISSING` (the source is not known to be gone) and not `UNREADABLE` (nothing was dereferenced). Draft name (§4.2). |
 
@@ -1214,11 +1227,13 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   bound; see below). A bare string is not enough
   on its own once a registry is in play (next bullets). (@grok draft)
 - `subject`, `authorizer`, `reader`, and `witness` take the §4.1 control
-  rule: a string value with a C0 control or DEL anywhere in it is an error
-  naming the line and the field. `"a"` and `"a"` plus `00` print alike and
+  rule: a string value with a C0 control, DEL, a C1 control, U+2028 or
+  U+2029 anywhere in it is an error naming the line and the field. `"a"`
+  and `"a"` plus `00` print alike and
   compare unequal, so without the rule an authorizer could be its own
-  witness. (Kama, `#forge` 2026-10-20. DEL as in §4.1; checked whenever
-  the field is present, not only for `kind` `read`: @grok draft.)
+  witness. (Kama, `#forge` 2026-10-20. DEL, C1, U+2028 and U+2029 as in
+  §4.1; checked whenever the field is present, not only for `kind` `read`:
+  @grok draft.)
 - `subject`, `authorizer`, `reader`, and `witness` also take the §4.1
   type rule: each, when present, is a JSON string, not empty and not only
   whitespace (the §4.1 set), else an error naming the line and the field.
@@ -1289,11 +1304,13 @@ error. A `kind` that is not a string is an error naming the line (§4.1).
   2026-10-12; whitespace-as-error is @grok draft.) So a CRLF registry fails
   whole: its first identifier line ends in `0d`, and the whole registry
   cannot be read. That is the same `0d` that line-range bytes keep (§4.1).
-  (Kama, `#forge` 2026-10-18.) An identifier line with a C0 control or
-  DEL (§4.1) anywhere in it is the same kind of error: the registry cannot
-  be read, the reason names the line, and no witness resolves. Empty and
-  `#` lines are skipped, as for whitespace. (Kama, `#forge` 2026-10-20;
-  DEL as in §4.1: Kama, `#forge` 2026-11-22.) An identifier that does not
+  (Kama, `#forge` 2026-10-18.) An identifier line with a character in the
+  §4.1 control rule (C0, DEL, C1, U+2028, U+2029) anywhere in it is the
+  same kind of error: the registry cannot be read, the reason names the
+  line, and no witness resolves. Empty and `#` lines are skipped, as for
+  whitespace. (Kama, `#forge` 2026-10-20; DEL as in §4.1: Kama, `#forge`
+  2026-11-22; C1, U+2028 and U+2029 as in §4.1, one rule said once: Kama,
+  `#forge` 2026-11-25.) An identifier that does not
   resolve in the named registry does not qualify as `witness`; the checker
   derives `UNWITNESSED`. The same registry SHOULD be what other party slots
   on the read (`subject`, `authorizer`, `reader`) are checked against when
@@ -1516,12 +1533,13 @@ array or object `disputed` is the same error, yes; the empty string is a
 mark, printed as `true` is; every receipt string the checker prints takes
 the §4.1 control rule (Kama, `#forge` 2026-11-24; Lume, no reply). 36
 draft marks remain above §13: §0 12, §6 2, §7 5, §9 1, §11 16; §5, §8,
-§10 and §12 carry none. §6 is next (Kama, `#forge` 2026-11-24), then §7
-and §9, then §11. Open from that fold, for her, not drafted: C1
-(U+0080–U+009F, including U+0085) and U+2028/U+2029 are not cut by the
-control rule, so a printed string can still carry a line break some
-readers render; and `derivation` has no type rule, so a non-string one
-prints as the checker's language renders it.
+§10 and §12 carry none. §6 is next (Kama, `#forge` 2026-11-24 and
+2026-11-25), then §7 and §9, then §11. The two rows that fold left open
+are cut and folded: C1 (U+0080–U+009F, including U+0085), U+2028 and
+U+2029 take the §4.1 control rule, one rule said once; `derivation` is a
+string or absent, anything else an error naming the line and the field,
+the same fold as `disputed` (Kama, `#forge` 2026-11-25; Lume, no reply).
+They are no longer open.
 
 **Adoption (Kama, `#forge` 2026-11-21).** v0.2 is adopted by a Pulse close
 like D-036's; then PR 2 merges with Thomas present; then the mirror line
@@ -2189,6 +2207,27 @@ remain above §13 (37, less the one in §5.1): §0 12, §6 2, §7 5, §9 1,
 - §5.1: whose hand clause: yes.
 - §12: C1 and U+2028/U+2029 in printed strings, and `derivation`'s type,
   left open for her, not drafted.
+
+**v0.2-draft, fold Kama `#forge` 2026-11-25, the two open rows (Lume: no reply)**
+
+DECISIONS.md is not edited. No mark added or dropped: 36 draft marks
+remain above §13, counted with grep (§0 12, §6 2, §7 5, §9 1, §11 16).
+§6 is next.
+
+- §4.1: C1 (U+0080–U+009F, U+0085 among them), U+2028 and U+2029 take
+  the control rule, said once: with C0 and DEL, 67 code points, an error
+  naming the line and the field anywhere in any receipt string the
+  checker prints (and `author`). U+0085 is a line break in some readers;
+  U+2028 and U+2029 are line breaks by name. The §11.3 party slots and
+  registry identifier lines cite the same rule.
+- §5.1: a reason of only tabs or line breaks is an error, not a mark;
+  yes, now citing her post. U+0085, U+2028 and U+2029 are line breaks,
+  so a reason of only those is the same error. Spaces alone stay a mark,
+  printed as `true`.
+- §4.1: `derivation` is a string or absent. `null`, a number, a boolean,
+  an array or an object is an error naming the line and the field, the
+  same fold as `disputed`.
+- §0 / §12: both rows folded, no longer open.
 
 ---
 
