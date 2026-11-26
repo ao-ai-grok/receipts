@@ -45,8 +45,10 @@
 #          (Kama #forge 2026-11-24): id, claim, disputed, derivation,
 #          supersedes, party_registry, source.uri, source.form_used,
 #          source.canonical, source.span, and the §11.3 party slots; author
-#          too. A C0 control or DEL in one is an error naming the line and
-#          the field, before any source is read.
+#          too. A C0 control, DEL, C1 control, U+2028 or U+2029 in one is
+#          an error naming the line and the field, before any source is read
+#          (C1, U+2028/U+2029: Kama #forge 2026-11-25). derivation is a
+#          string or absent, else an error naming the line and the field.
 #   §4.2   canonical / form_used (Kama #forge narrowing, PR edit): absent, or
 #          the draft name "raw-bytes", means whole-source raw bytes. Known
 #          forms this tool can reproduce: raw-bytes and lines-utf8-nl (the
@@ -486,9 +488,17 @@ def unicode_pin_gap():
     return None if found == UNICODE_VERSION else found
 
 
+# §4.1 control rule, one rule said once: C0, DEL (Kama #forge 2026-10-19,
+# 2026-11-22), C1 U+0080-U+009F (U+0085 among them), U+2028 and U+2029
+# (Kama #forge 2026-11-25). 67 code points. A string that can start a new
+# line in any reader can fake a line of the check-report.
+CONTROLS = frozenset([*map(chr, range(0x20)), "\x7f", *map(chr, range(0x80, 0xA0)),
+                      "\u2028", "\u2029"])
+
+
 def control_at(value):
-    """Index of the first C0 control or DEL in value (§4.1), or None."""
-    return next((i for i, ch in enumerate(value) if ch < "\x20" or ch == "\x7f"), None)
+    """Index of the first character in the §4.1 control rule in value, or None."""
+    return next((i for i, ch in enumerate(value) if ch in CONTROLS), None)
 
 
 def refuse_control(value, n, field):
@@ -511,7 +521,8 @@ def check_field_types(r, n):
         if all(ch in WHITE_SPACE for ch in value):
             sys.exit(f"error: receipt on line {n} field '{field}' is only whitespace ({value!r})")
         # Kama #forge 2026-10-19: no C0 control (U+0000-U+001F) in these three;
-        # DEL (U+007F) too (@grok draft). Tab and line breaks are C0. C1 is not cut.
+        # DEL (U+007F) too (Kama #forge 2026-11-22). Tab and line breaks are C0.
+        # C1, U+2028 and U+2029 too (Kama #forge 2026-11-25).
         # No exception for the claim: a claim with a line break is two claims
         # (D-027; Kama #forge 2026-10-20).
         refuse_control(value, n, field)
@@ -560,6 +571,12 @@ def check_field_types(r, n):
     if "disputed" in r and not isinstance(r["disputed"], (bool, str)):
         sys.exit(f"error: receipt on line {n} field 'disputed' is {json_type(r['disputed'])}, "
                  "not a boolean or a string")
+    # Kama #forge 2026-11-25: derivation is a string or absent; anything else
+    # (null, a number, a boolean, an array, an object) is an error naming the
+    # line and the field, the same fold as disputed.
+    if "derivation" in r and not isinstance(r["derivation"], str):
+        sys.exit(f"error: receipt on line {n} field 'derivation' is {json_type(r['derivation'])}, "
+                 "not a string")
     target = r.get("supersedes")
     if target is not None and not isinstance(target, str):
         sys.exit(f"error: receipt on line {n} field 'supersedes' is {json_type(target)}, "

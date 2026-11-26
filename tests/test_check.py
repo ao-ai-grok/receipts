@@ -470,8 +470,16 @@ class ControlCharacters(unittest.TestCase):
                 p = run([{**receipt("r-1", sha256=sha(RAW)), "author": "x" + chr(cp)}])
                 self.assertNamed(p, 1, "author", f"contains control character U+{cp:04X}")
 
-    def test_c1_and_printable_neighbours_still_pass(self):  # C1 is not cut
-        for value in ("x\x80y", "x\x85y", "x\x9fy", "a b", "x~y"):
+    def test_every_c1_and_u2028_u2029(self):
+        # Kama #forge 2026-11-25: C1, U+2028 and U+2029 take the same rule.
+        # Passed on fc88130 (C1 was not cut).
+        for cp in [*range(0x80, 0xA0), 0x2028, 0x2029]:
+            with self.subTest(cp=hex(cp)):
+                p = run([{**receipt("r-1", sha256=sha(RAW)), "author": "x" + chr(cp)}])
+                self.assertNamed(p, 1, "author", f"contains control character U+{cp:04X} at index 1")
+
+    def test_printable_neighbours_still_pass(self):  # U+00A0, U+007E, U+2027, U+202A
+        for value in ("x\xa0y", "x~y", "a b", "x\u2027y", "x\u202ay", "x\xa1y"):
             with self.subTest(value=value):
                 p = run([{**receipt("r-1", sha256=sha(RAW)), "author": value}])
                 self.assertIn("[  OK   ] r-1", p.stdout)
@@ -533,6 +541,15 @@ class PartyControlCharacters(unittest.TestCase):
         self.assertNotIn("witness window not checked", p.stdout)
         self.assertEqual(p.returncode, 1)
 
+    def test_registry_line_with_c1_u2028_u2029(self):
+        # §11.3 cites the §4.1 rule, said once (Kama #forge 2026-11-25). On
+        # fc88130 the registry read and w-hand resolved.
+        for ch in "\x80\x85\x9f\u2028\u2029":
+            with self.subTest(ch=hex(ord(ch))):
+                p = RegistryReadStrictly.check(self, f"s\na\nr\nw-hand\nx{ch}y\n".encode())
+                self.assertIn(f"line 5 contains control character U+{ord(ch):04X} at index 1", p.stdout)
+                self.assertIn("[UNWITNESSED] r-1", p.stdout)
+
     def test_registry_line_with_del_or_nul(self):
         for ch in "\x00\x7f":
             with self.subTest(ch=hex(ord(ch))):
@@ -558,8 +575,16 @@ class PartyControlCharacters(unittest.TestCase):
         r = {**receipt("r-1", sha256=sha(RAW)), "witness": "a\x00"}
         self.assertNamed(run([r]), 1, "witness", "U+0000 at index 1")
 
-    def test_c1_and_clean_party_ids_still_pass(self):  # C1 is not cut
-        p = run([self.read(witness="w\x85")])
+    def test_c1_u2028_u2029_in_party_ids_are_errors(self):  # Kama #forge 2026-11-25
+        for field in ("subject", "authorizer", "reader", "witness"):
+            for ch in "\x80\x85\x9f\u2028\u2029":
+                with self.subTest(field=field, ch=hex(ord(ch))):
+                    p = run([receipt("r-0", sha256=sha(RAW)),
+                             self.read(**{"id": "r-1", "witness": "w-hand", field: "p" + ch})])
+                    self.assertNamed(p, 2, field, f"U+{ord(ch):04X} at index 1")
+
+    def test_clean_party_ids_still_pass(self):
+        p = run([self.read(witness="w\xa0x")])
         self.assertNotIn("UNWITNESSED", p.stdout)
         self.assertEqual(p.returncode, 0)
 
@@ -653,9 +678,11 @@ class PartyIdsNameSomeone(unittest.TestCase):
                     p = run([self.read(**{"witness": "w-hand", field: value})])
                     self.assertNamed(p, 1, field, f"has no letter or number once folded ({value!r} shows as '')")
 
-    def test_c1_only_is_not_a_name(self):  # Cc includes C1; the control rule does not cut it
+    def test_c1_only_is_a_control_error(self):
+        # Was "has no letter or number" at fc88130; C1 now takes the §4.1
+        # control rule (Kama #forge 2026-11-25), checked before the name.
         p = run([self.read(witness="\x80")])
-        self.assertNamed(p, 1, "witness", "has no letter or number once folded ('\\x80' shows as '\\x80')")
+        self.assertNamed(p, 1, "witness", "contains control character U+0080 at index 0")
 
     def test_nbsp_and_ideographic_space_only_are_whitespace(self):  # Z, caught first as whitespace
         for value in ("\u00a0", "\u3000", "\u2028", "\u00a0\u3000"):
@@ -1605,10 +1632,45 @@ class PrintedStringsTakeControlRule(unittest.TestCase):
                 self.assertIn("error: receipt on line 1 field 'disputed' contains control character", p.stderr)
                 self.assertEqual(p.returncode, 1)
 
-    def test_disputed_c1_is_not_cut(self):  # §4.1: C1 is not cut here
-        p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": "a\x85b"}])
-        self.assertIn("[DISPUTED] r-1: human mark, not computed: a\x85b", p.stdout)
-        self.assertEqual(p.returncode, 1)
+    def test_disputed_u0085_is_an_error(self):
+        # Kama #forge 2026-11-25: U+0085 is a line break in some readers. On
+        # fc88130 this printed "[DISPUTED] r-1: ...: a\x85b".
+        p = run([receipt("r-1", sha256=sha(RAW)),
+                 {**receipt("r-2", sha256=sha(RAW)), "disputed": "one\x85  [  OK   ] r-9: fake"}])
+        self.assertNamed(p, 2, "disputed", "contains control character U+0085 at index 3")
+
+    def test_disputed_u2028_is_an_error(self):  # a line break by name
+        p = run([receipt("r-1", sha256=sha(RAW)),
+                 {**receipt("r-2", sha256=sha(RAW)), "disputed": "one\u2028  [  OK   ] r-9: fake"}])
+        self.assertNamed(p, 2, "disputed", "contains control character U+2028 at index 3")
+
+    def test_disputed_u2029_is_an_error(self):
+        p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": "one\u2029two"}])
+        self.assertNamed(p, 1, "disputed", "contains control character U+2029 at index 3")
+
+    def test_disputed_every_c1(self):
+        for cp in range(0x80, 0xA0):
+            with self.subTest(cp=hex(cp)):
+                p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": "x" + chr(cp)}])
+                self.assertNamed(p, 1, "disputed", f"contains control character U+{cp:04X} at index 1")
+
+    def test_disputed_only_line_breaks_is_an_error_not_a_mark(self):
+        # U+0085, U+2028, U+2029 are in the §4.1 whitespace list and in the
+        # control rule: the control rule wins, as for 09-0d.
+        for value in ("\x85", "\u2028", "\u2029", " \u2028 "):
+            with self.subTest(value=value):
+                p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": value}])
+                self.assertIn("error: receipt on line 1 field 'disputed' contains control character", p.stderr)
+                self.assertNotIn("DISPUTED", p.stdout)
+                self.assertEqual(p.returncode, 1)
+
+    def test_disputed_spaces_alone_stay_a_mark(self):  # Kama #forge 2026-11-25
+        for value in (" ", "\xa0", "\u3000", " \u2003 "):
+            with self.subTest(value=value):
+                p = run([{**receipt("r-1", sha256=sha(RAW)), "disputed": value}])
+                self.assertIn("[DISPUTED] r-1: human mark, not computed\n", p.stdout)
+                self.assertEqual(p.stderr, "")
+                self.assertEqual(p.returncode, 1)
 
     def test_every_other_printed_string(self):
         cases = (("derivation", lambda r, v: {**r, "derivation": v}),
@@ -1619,7 +1681,7 @@ class PrintedStringsTakeControlRule(unittest.TestCase):
                  ("source.canonical", lambda r, v: {**r, "source": {**r["source"], "canonical": v}}),
                  ("source.span", lambda r, v: {**r, "source": {**r["source"], "span": v}}))
         for field, put in cases:
-            for ch in "\n\r\x7f":
+            for ch in "\n\r\x7f\x80\x85\x9f\u2028\u2029":
                 with self.subTest(field=field, ch=hex(ord(ch))):
                     bad = put(receipt("r-2", sha256=sha(RAW)), "raw" + ch + ".txt")
                     p = run([receipt("r-1", sha256=sha(RAW)), bad])
@@ -1627,6 +1689,29 @@ class PrintedStringsTakeControlRule(unittest.TestCase):
                                   f"character U+{ord(ch):04X} at index 3", p.stderr)
                     self.assertNotIn("[  OK   ]", p.stdout)
                     self.assertEqual(p.returncode, 1)
+
+    def test_derivation_non_string_is_an_error(self):
+        # Kama #forge 2026-11-25: a string or absent; anything else names the
+        # line and the field, the same fold as disputed. On fc88130 each of
+        # these checked OK and printed as Python renders it.
+        for value, name in ((7, "a number"), (1.5, "a number"), (None, "null"),
+                            (["wc", "-l"], "an array"), ({"cmd": "wc"}, "an object"),
+                            (True, "a boolean"), (False, "a boolean")):
+            with self.subTest(value=value):
+                p = run([receipt("r-1", sha256=sha(RAW)),
+                         {**receipt("r-2", sha256=sha(RAW)), "derivation": value}])
+                self.assertIn(f"error: receipt on line 2 field 'derivation' is {name}, not a string",
+                              p.stderr)
+                self.assertNotIn("[  OK   ]", p.stdout)
+                self.assertNotIn("Traceback", p.stderr)
+                self.assertEqual(p.returncode, 1)
+
+    def test_derivation_absent_or_string_is_ok(self):
+        for extra in ({}, {"derivation": "wc -l raw.txt"}, {"derivation": ""}):
+            with self.subTest(extra=extra):
+                p = run([{**receipt("r-1", sha256=sha(RAW)), **extra}])
+                self.assertIn("[  OK   ] r-1", p.stdout)
+                self.assertEqual(p.returncode, 0)
 
     def test_printed_strings_without_controls_still_check(self):
         r = {**receipt("r-1", sha256=sha(RAW)), "derivation": "wc -l raw.txt",
