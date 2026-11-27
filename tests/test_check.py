@@ -858,18 +858,136 @@ class Gap6IdsAndSupersedes(unittest.TestCase):
 
     def test_supersedes_pointing_later_is_ignored_and_flagged(self):
         p = run([receipt("r-1", "r-2"), receipt("r-2")])
-        self.assertIn("r-1 supersedes r-2, which comes later in the file; ignored", p.stderr)
+        self.assertIn('BAD SUPERSEDES: line 1: r-1 supersedes "r-2": an id on a later line (line 2)', p.stderr)
         self.assertIn("0 superseded", p.stdout)
 
     def test_dangling_supersedes_is_flagged(self):
         p = run([receipt("r-1", "r-9")])
-        self.assertIn("warning: r-1 supersedes r-9, which is not in this file", p.stderr)
+        self.assertIn('warning: BAD SUPERSEDES: line 1: r-1 supersedes "r-9": not in this file', p.stderr)
         self.assertEqual(p.returncode, 0)
 
     def test_dangling_supersedes_is_an_error_under_strict(self):
         p = run([receipt("r-1", "r-9")], "--strict")
-        self.assertIn("error: r-1 supersedes r-9", p.stderr)
+        self.assertIn('error: BAD SUPERSEDES: line 1: r-1 supersedes "r-9"', p.stderr)
         self.assertNotEqual(p.returncode, 0)
+
+
+class BadSupersedesPrinted(unittest.TestCase):
+    """Kama #forge 2026-11-26, SPEC §6: a bad supersedes supersedes nothing, and
+    its writer believes the old claim is withdrawn, so the default run prints it
+    in the check-report, naming the line, the id it named and which of the three
+    it is. "" names no id: invalid, not absent. Ids match as exact strings
+    (§4.1): composed é and e + U+0301 are two ids. File order means a chain
+    cannot loop. On 62cffac a bad supersedes was a stderr warning only, with no
+    line and no report row."""
+
+    NFC = unicodedata.normalize("NFC", "caf\u00e9")
+    NFD = unicodedata.normalize("NFD", "caf\u00e9")
+
+    def row(self, p, text):
+        self.assertIn(f"  [BAD SUPERSEDES] {text}", p.stdout)
+        self.assertIn(f"warning: BAD SUPERSEDES: {text}", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+
+    def test_later_line_is_printed_by_default(self):
+        p = run([receipt("r-1", "r-2"), receipt("r-2")])
+        self.row(p, 'line 1: r-1 supersedes "r-2": an id on a later line (line 2); nothing superseded (§6)')
+        self.assertIn("2 receipts, 0 superseded, sampling 2", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_own_id_is_printed_by_default(self):
+        p = run([receipt("r-0"), receipt("r-1", "r-1")])
+        self.row(p, 'line 2: r-1 supersedes "r-1": its own id; nothing superseded (§6)')
+        self.assertIn("0 superseded", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_not_in_file_is_printed_by_default(self):
+        p = run([receipt("r-1"), receipt("r-2", "r-9")])
+        self.row(p, 'line 2: r-2 supersedes "r-9": not in this file; nothing superseded (§6)')
+        self.assertIn("] r-1:", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_each_case_is_an_error_under_strict(self):
+        for rs in ([receipt("r-1", "r-2"), receipt("r-2")], [receipt("r-1", "r-1")],
+                   [receipt("r-1", "r-9")], [receipt("r-1", "")]):
+            with self.subTest(rs=[r["supersedes"] for r in rs]):
+                p = run(rs, "--strict")
+                self.assertIn("error: BAD SUPERSEDES: line 1: r-1 supersedes ", p.stderr)
+                self.assertNotEqual(p.returncode, 0)
+
+    def test_empty_string_is_invalid_not_absent(self):
+        p = run([receipt("r-1"), receipt("r-2", "")])
+        self.row(p, 'line 2: r-2 supersedes "": not in this file ("" names no id: invalid, not absent); '
+                    'nothing superseded (§6)')
+        self.assertIn("2 receipts, 0 superseded", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_null_and_absent_are_absent(self):
+        absent = {k: v for k, v in receipt("r-2").items() if k != "supersedes"}
+        p = run([receipt("r-1", None), absent], "--strict")
+        self.assertNotIn("BAD SUPERSEDES", p.stdout + p.stderr)
+        self.assertEqual(p.returncode, 0)
+
+    def test_nfd_does_not_supersede_nfc(self):
+        self.assertNotEqual(self.NFC, self.NFD)
+        p = run([receipt(self.NFC), receipt("r-2", self.NFD)])
+        self.assertIn("2 receipts, 0 superseded, sampling 2", p.stdout)
+        self.row(p, f'line 2: r-2 supersedes "{self.NFD}": not in this file '
+                    f'(the id on line 1 matches it only after Unicode normalization; '
+                    f'ids match as exact strings, §4.1); nothing superseded (§6)')
+
+    def test_nfc_does_not_supersede_nfd(self):
+        p = run([receipt(self.NFD), receipt("r-2", self.NFC)])
+        self.assertIn("0 superseded", p.stdout)
+        self.assertIn(f'r-2 supersedes "{self.NFC}": not in this file (the id on line 1', p.stdout)
+
+    def test_nfc_and_nfd_are_two_ids_not_a_reuse(self):
+        p = run([receipt(self.NFC), receipt(self.NFD)], "--strict")
+        self.assertNotIn("reuses id", p.stderr)
+        self.assertIn("2 receipts, 0 superseded, sampling 2", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    def test_exact_match_supersedes(self):
+        p = run([receipt(self.NFD), receipt("r-2", self.NFD)], "--strict")
+        self.assertIn("2 receipts, 1 superseded, sampling 1", p.stdout)
+        self.assertNotIn("BAD SUPERSEDES", p.stdout + p.stderr)
+        self.assertEqual(p.returncode, 0)
+
+    def test_case_and_whitespace_are_not_folded(self):
+        for target in ("R-1", "r-1 ", " r-1", "r\u20111"):
+            with self.subTest(target=target):
+                p = run([receipt("r-1"), receipt("r-2", target)])
+                self.assertIn("0 superseded", p.stdout)
+                self.assertIn(f'line 2: r-2 supersedes "{target}": not in this file; nothing superseded',
+                              p.stdout)
+
+    def test_two_way_loop_cannot_form(self):
+        p = run([receipt("r-1", "r-2"), receipt("r-2", "r-1")])
+        self.row(p, 'line 1: r-1 supersedes "r-2": an id on a later line (line 2); nothing superseded (§6)')
+        self.assertIn("2 receipts, 1 superseded, sampling 1", p.stdout)
+        self.assertIn("] r-2:", p.stdout)
+
+    def test_three_way_loop_cannot_form(self):
+        p = run([receipt("a", "c"), receipt("b", "a"), receipt("c", "b")])
+        self.row(p, 'line 1: a supersedes "c": an id on a later line (line 3); nothing superseded (§6)')
+        self.assertIn("3 receipts, 2 superseded, sampling 1", p.stdout)
+        self.assertIn("] c:", p.stdout)
+
+    def test_every_counted_pointer_goes_back(self):
+        """Any file, any pointers: what supersedes points at an earlier line, so
+        no cycle can be counted and no checker needs a cycle check."""
+        import random
+        check = import_check()
+        rng = random.Random(20261126)
+        for _ in range(300):
+            n = rng.randint(1, 8)
+            ids = [f"r-{i}" for i in range(n)]
+            rs = [{"id": i, "supersedes": rng.choice(ids + [None, "", "r-x"])} for i in ids]
+            line = {r["id"]: k for k, r in enumerate(rs)}
+            _, superseded, _, _ = check.current_set(rs)
+            counted = {r["supersedes"] for k, r in enumerate(rs)
+                       if r["supersedes"] in line and line[r["supersedes"]] < k}
+            self.assertEqual(superseded, counted)
 
 
 class SupersedeForks(unittest.TestCase):

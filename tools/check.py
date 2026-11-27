@@ -62,12 +62,16 @@
 #   §4.2   UNFETCHED (draft name): a URL or URN this checker did not fetch.
 #          Not MISSING, and not UNREADABLE.
 #   §6     a receipt supersedes only a receipt on an earlier line ("later"
-#          is file order, not the date field). A supersedes that names nothing
-#          in the file, itself, or a later line is warned and ignored (an
-#          error under --strict). It does not supersede. Two or more current
-#          receipts superseding one id: FORKED, naming the id and each line;
-#          all stay current, none is picked; an error under --strict (Kama
-#          #forge 2026-10-17). A superseded correction does not count: a chain.
+#          is file order, not the date field), so a chain cannot loop. A
+#          supersedes that names nothing in the file, itself, or a later line
+#          supersedes nothing; the default run prints it as a BAD SUPERSEDES
+#          row naming the line, the id named and which of the three (an error
+#          under --strict). "" names no id: invalid, not absent. Ids match as
+#          exact strings, no normalization (Kama #forge 2026-11-26). Two or
+#          more current receipts superseding one id: FORKED, naming the id and
+#          each line; all stay current, none is picked; an error under
+#          --strict (Kama #forge 2026-10-17). A superseded correction does not
+#          count: a chain.
 #   §7     review_by is YYYY-MM-DD. STALE once --today is strictly after that
 #          date and no later receipt supersedes it (the only "review recorded"
 #          this tool can see). It does not check that review_conditions were
@@ -686,15 +690,27 @@ def load_receipts(path: Path):
 def current_set(receipts):
     """Receipts not superseded by any later receipt (SPEC §6).
 
-    Returns (current, superseded, notes, forks). A fork is an id that two or
+    Returns (current, superseded, notes, rows). A fork is an id that two or
     more current receipts supersede (Kama, #forge 2026-10-17): named, not
     resolved. Every line of the sidecar is one receipt, so line = index + 1.
+    Only a pointer back to an earlier line supersedes, so a chain cannot loop
+    and nothing here needs a cycle check (Kama, #forge 2026-11-26).
+
+    A bad supersedes (an id not in the file, its own id, an id on a later
+    line) supersedes nothing. Its writer believes the old claim is withdrawn,
+    so it is printed by default in the report, naming the line, the id it
+    named and which of the three it is (Kama, #forge 2026-11-26): a
+    "BAD SUPERSEDES" report row, printed beside FORKED rows. "" names no id: invalid, not
+    absent. Ids match as exact strings, no normalization (§4.1).
     """
-    ids = {r["id"] for r in receipts}
     line = {r["id"]: n for n, r in enumerate(receipts, 1)}
-    earlier, superseded, notes, by = set(), set(), [], {}
-    for r in receipts:
+    nfc = {}
+    for i, n in line.items():
+        nfc.setdefault(unicodedata.normalize("NFC", i), n)
+    earlier, superseded, notes, by, bad = set(), set(), [], {}, []
+    for n, r in enumerate(receipts, 1):
         target = r.get("supersedes")
+        named = json.dumps(target, ensure_ascii=False) if isinstance(target, str) else None
         if target is None:
             pass
         elif not isinstance(target, str):
@@ -703,12 +719,20 @@ def current_set(receipts):
             superseded.add(target)
             by.setdefault(target, []).append(r["id"])
         elif target == r["id"]:
-            notes.append(f"{r['id']} supersedes itself; ignored")
-        elif target in ids:
-            notes.append(f"{r['id']} supersedes {target}, which comes later in the file; ignored")
+            bad.append(f"line {n}: {r['id']} supersedes {named}: its own id")
+        elif target in line:
+            bad.append(f"line {n}: {r['id']} supersedes {named}: an id on a later line "
+                       f"(line {line[target]})")
         else:
-            notes.append(f"{r['id']} supersedes {target}, which is not in this file (dangling supersedes)")
+            why = ""
+            if target == "":
+                why = ' ("" names no id: invalid, not absent)'
+            elif unicodedata.normalize("NFC", target) in nfc:
+                why = (f" (the id on line {nfc[unicodedata.normalize('NFC', target)]} matches it only "
+                       "after Unicode normalization; ids match as exact strings, §4.1)")
+            bad.append(f"line {n}: {r['id']} supersedes {named}: not in this file{why}")
         earlier.add(r["id"])
+    bad = [f"{b}; nothing superseded (§6)" for b in bad]
     forks = []
     for target, corrections in by.items():
         live = [c for c in corrections if c not in superseded]  # superseded: a chain, not a fork
@@ -718,8 +742,10 @@ def current_set(receipts):
                     "all stay current, none is picked")
             forks.append(f"{target} (line {line[target]}) is superseded by {names}; {stay}; "
                          "supersede the others to pick one (§6)")
+    notes += [f"BAD SUPERSEDES: {b}" for b in bad]
     notes += [f"FORKED: {f}" for f in forks]
-    return [r for r in receipts if r["id"] not in superseded], superseded, notes, forks
+    rows = [("BAD SUPERSEDES", b) for b in bad] + [("FORKED", f) for f in forks]
+    return [r for r in receipts if r["id"] not in superseded], superseded, notes, rows
 
 
 class InvalidUTF8InRange(ValueError):
@@ -1817,8 +1843,8 @@ def main():
     sidecar = hashlib.sha256(args.receipts_file.read_bytes()).hexdigest()
     print(f"receipts check — {args.receipts_file.name}")
     print(f"  {len(receipts)} receipts, {len(superseded)} superseded, sampling {len(pool)}")
-    for fork in forks:
-        print(f"  [FORKED] {fork}")
+    for label, row in forks:
+        print(f"  [{label}] {row}")
     print(f"  sample: {how}")
     print(f"  from: sidecar sha256 {sidecar}")
     print(f"  checked: {args.today}, by tools/check.py (SPEC v0.2-draft subset; see its header)")
