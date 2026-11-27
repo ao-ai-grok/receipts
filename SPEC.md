@@ -441,7 +441,11 @@ How to read it:
   printed receipt string (§4.1, §5.1; `#forge` 2026-11-24). She cut the
   two rows that fold left open: C1, U+2028 and U+2029 take the same
   control rule, and `derivation` is a string or absent (§4.1, §5.1;
-  `#forge` 2026-11-25). The marks left are for her pass by section, §6
+  `#forge` 2026-11-25). She said yes to the 2 in §6, with narrowings: file
+  order means a chain cannot loop; a bad `supersedes` is printed by the
+  default run, naming the line, the id and which of the three it is;
+  `""` is invalid, not absent; ids match as exact strings (§4.1, §6;
+  `#forge` 2026-11-26). The marks left are for her pass by section, §7
   next (§12).
 - **`#forge` PR edits.** Where Kama (or Lume) agrees a cut on `#forge` and
   says it is a PR edit rather than a new decision, this draft folds the
@@ -592,7 +596,12 @@ an error naming the line and the field, the same fold as `disputed`
 (§5.1) (Kama, `#forge` 2026-11-25; Lume, no reply). Any other type is an
 error naming the line and the field, checked before ids are compared, so
 `1` and `"1"` are never two ids that print the same. Presence alone is not
-enough. (Kama, `#forge` 2026-10-16.) `id`, `claim`, and `author` are also
+enough. (Kama, `#forge` 2026-10-16.) Ids match as exact strings, code
+point for code point: no Unicode normalization, no case folding, no
+whitespace folding. A composed é (U+00E9) and e plus U+0301 are two ids,
+though they can print the same, so a `supersedes` naming one points at
+nothing if only the other is in the file (§6). (Kama, `#forge`
+2026-11-26; Lume, no reply.) `id`, `claim`, and `author` are also
 non-empty and not only whitespace. `""`, or a string that is only
 whitespace, is an error naming the line and the field. An author who names
 nobody is a claim with no one behind it. (Kama, `#forge` 2026-10-18.)
@@ -989,16 +998,28 @@ of receipts not superseded by any later receipt. Chains are allowed
 (a correction can itself be corrected). A retraction is a correction whose
 claim is "the superseded claim is withdrawn," with the reason as its source.
 
-**Later means file order** (@grok draft). A receipt supersedes only an `id`
-on an earlier line. "Later" is not the `date` field. The sidecar is
-append-only, and dates can tie, so the line is the order a reader can check.
+**Later means file order** (Kama, `#forge` 2026-11-26; Lume, no reply).
+A receipt supersedes only an `id` on an earlier line. "Later" is not the
+`date` field. The sidecar is append-only, and dates can tie, so the line
+is the order a reader can check. So a chain cannot loop: every pointer
+that supersedes goes back to an earlier line, and nobody writes a cycle
+check. (No loop: Kama, `#forge` 2026-11-26.)
 
-**A bad `supersedes` does not supersede** (@grok draft). One that names an
-id not in the file, names its own id, or names an id on a later line is
-invalid. The checker warns and ignores it: nothing is superseded by it,
-and the checker does not crash. Under `--strict` that warning is an error.
-A `supersedes` that is neither a string nor null is an error naming the
-line (§4.1); the checker stops rather than guessing which id was meant.
+**A bad `supersedes` does not supersede** (Kama, `#forge` 2026-11-26;
+Lume, no reply). One that names an id not in the file, names its own id,
+or names an id on a later line is invalid. Nothing is superseded by it,
+and the checker does not crash. Its writer believes the old claim is
+withdrawn, and it isn't, so the fold goes toward the mark: the default
+run prints it in the check-report, naming the line, the id it named, and
+which of the three it is. It does not fail the run by default; under
+`--strict` it is an error. `"supersedes": ""` names no id: it is invalid
+(no id is empty, so it names an id not in the file), not absent. Only
+`null`, or no field at all, is absent. (Printed by default, `""` invalid:
+Kama, `#forge` 2026-11-26.) Ids match as exact strings (§4.1), so a
+`supersedes` that differs from an id only by Unicode normalization names
+an id not in the file. A `supersedes` that is neither a string nor null
+is an error naming the line (§4.1); the checker stops rather than
+guessing which id was meant.
 
 **Two corrections of one id fork** (Kama, `#forge` 2026-10-17). When two or
 more receipts supersede the same id and none of them is itself superseded,
@@ -1531,10 +1552,14 @@ mark; a number or `null` is an error), and one clause on whose hand
 (Kama, `#forge` 2026-11-23; Lume, no reply). §5's last mark is done: an
 array or object `disputed` is the same error, yes; the empty string is a
 mark, printed as `true` is; every receipt string the checker prints takes
-the §4.1 control rule (Kama, `#forge` 2026-11-24; Lume, no reply). 36
-draft marks remain above §13: §0 12, §6 2, §7 5, §9 1, §11 16; §5, §8,
-§10 and §12 carry none. §6 is next (Kama, `#forge` 2026-11-24 and
-2026-11-25), then §7 and §9, then §11. The two rows that fold left open
+the §4.1 control rule (Kama, `#forge` 2026-11-24; Lume, no reply). §6
+is done: yes to its 2, with narrowings: file order means a chain cannot
+loop; a bad `supersedes` is printed by the default run, naming the line,
+the id it named and which of the three it is; `""` is invalid, not
+absent; ids match as exact strings, no normalization (§4.1) (Kama,
+`#forge` 2026-11-26; Lume, no reply). 34 draft marks remain above §13:
+§0 12, §7 5, §9 1, §11 16; §5, §6, §8, §10 and §12 carry none. §7 is
+next (Kama, `#forge` 2026-11-26), then §9, then §11. The two rows that fold left open
 are cut and folded: C1 (U+0080–U+009F, including U+0085), U+2028 and
 U+2029 take the §4.1 control rule, one rule said once; `derivation` is a
 string or absent, anything else an error naming the line and the field,
@@ -2228,6 +2253,25 @@ remain above §13, counted with grep (§0 12, §6 2, §7 5, §9 1, §11 16).
   an array or an object is an error naming the line and the field, the
   same fold as `disputed`.
 - §0 / §12: both rows folded, no longer open.
+
+**v0.2-draft, fold Kama `#forge` 2026-11-26, §6 (Lume: no reply)**
+
+DECISIONS.md is not edited. Both §6 marks are folded: 34 draft marks
+remain above §13, counted with grep (§0 12, §7 5, §9 1, §11 16). §7 is
+next.
+
+- §6 file order: yes, now citing her post. One clause added: every
+  pointer that supersedes goes back to an earlier line, so a chain cannot
+  loop and nobody writes a cycle check.
+- §6 a bad `supersedes`: yes, folded toward the mark. The default run
+  prints it in the check-report, naming the line, the id it named, and
+  which of the three it is (not in the file, its own id, a later line).
+  Still not failing by default; an error under `--strict`.
+  `"supersedes": ""` names no id: invalid, not absent.
+- §4.1: ids match as exact strings, no Unicode normalization or folding.
+  A composed é and e plus U+0301 are two ids, so a `supersedes` naming
+  one points at nothing if only the other is in the file.
+- §0 / §12: §6 done.
 
 ---
 
