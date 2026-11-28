@@ -72,10 +72,17 @@
 #          each line; all stay current, none is picked; an error under
 #          --strict (Kama #forge 2026-10-17). A superseded correction does not
 #          count: a chain.
-#   §7     review_by is YYYY-MM-DD. STALE once --today is strictly after that
-#          date and no later receipt supersedes it (the only "review recorded"
-#          this tool can see). It does not check that review_conditions were
-#          written before the date.
+#   §7     review_by is YYYY-MM-DD, a real calendar date (2026-02-30 is an
+#          error naming the line and field). The check date is the UTC date
+#          when the run starts, printed in the report (--today overrides, for
+#          tests); STALE once it is strictly after review_by and the receipt
+#          is in the current view (a later receipt on a later line names it
+#          in supersedes; a bad supersedes records nothing, §6: the only
+#          "review recorded" this tool can see). review_by with no condition
+#          (absent, "", U+0020 spaces only) is a [REVIEW CONDITIONS]
+#          row by default, an error under --strict (Kama #forge 2026-11-27).
+#          It does not check that review_conditions were written before the
+#          date, nor which conditions a review evaluated (said in SPEC §7).
 #   §5.2   sampling_warrant is a line of this check-report, not a field on
 #          each receipt: the run licenses nothing about receipts it did not read.
 #   §11    kind names the class. UNWITNESSED only for kind "read" (§11.3):
@@ -222,7 +229,7 @@ import re
 import subprocess
 import sys
 import unicodedata
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 UNREADABLE = "UNREADABLE"
@@ -261,13 +268,55 @@ def v02_notes(r):
         notes.append("each party needs 'did' and 'answers_for' (§4.3)")
     if "continuity" in r and r["continuity"] not in ("party", "process", "both"):
         notes.append("continuity must be party, process, or both (§4.3)")
-    if "review_by" in r and "review_conditions" not in r:
-        notes.append("review_by has no review_conditions beside it (§7)")
+    why = no_conditions(r)
+    if why:
+        notes.append(why)
     if "kind" in r and r["kind"] not in KINDS:
         notes.append("kind is not one of the §11 classes (" + ", ".join(sorted(KINDS)) + ")")
     if "window" in r and not window_ok(r["window"]):
         notes.append("window must be YYYY-MM-DD/YYYY-MM-DD (§11.3)")
     return notes
+
+
+def no_conditions(r):
+    """Why a receipt with review_by names no condition, or None (§7).
+
+    Kama #forge 2026-11-27: MAY warn is quieter than D-009 b's MUST, so the
+    fold goes toward the mark: printed by default, an error under --strict.
+    Absent, "", U+0020 spaces only (no second whitespace set: NBSP is not a
+    space here) each name no condition. A value that is not a string is not
+    cut here (SPEC §7 says a string; left for Kama). The checker does not
+    interpret a condition that is there (§7).
+    """
+    if "review_by" not in r:
+        return None
+    if "review_conditions" not in r:
+        return "review_by has no review_conditions beside it (§7)"
+    c = r["review_conditions"]
+    if not isinstance(c, str):
+        return None
+    if c == "":
+        return 'review_by has review_conditions "": it names no condition (§7)'
+    if not c.strip(" "):
+        return "review_by has review_conditions of spaces only: it names no condition (§7)"
+    return None
+
+
+def condition_rows(receipts):
+    """Report rows for no_conditions, by line, each naming the line and id."""
+    rows = []
+    for n, r in enumerate(receipts, 1):
+        why = no_conditions(r)
+        if why:
+            rows.append(("REVIEW CONDITIONS",
+                         f"line {n}: {r['id']} review_by {r['review_by']}: "
+                         f"{why.replace('review_by has ', 'has ', 1)}"))
+    return rows
+
+
+def run_start_date():
+    """The check date: the UTC date when the run starts (Kama #forge 2026-11-27)."""
+    return datetime.now(timezone.utc).date()
 
 
 def ymd_ok(value):
@@ -1791,14 +1840,18 @@ def main():
     ap.add_argument("--sample", type=int, default=0, help="sample size (default: all current receipts)")
     ap.add_argument("--seed", type=int, default=None, help="RNG seed for reproducible samples (one is picked and printed if omitted)")
     ap.add_argument("--all", action="store_true", help="include superseded receipts in the pool")
-    ap.add_argument("--today", type=date.fromisoformat, default=date.today(),
-                    help="date to check review_by against, YYYY-MM-DD (default: system date)")
+    ap.add_argument("--today", type=date.fromisoformat, default=None,
+                    help="date to check review_by against, YYYY-MM-DD (default: the UTC "
+                         "date when the run starts; for tests and reruns)")
     ap.add_argument("--strict", action="store_true", help="make v0.2 schema warnings errors")
     ap.add_argument("--pin", metavar="EVENT_ID",
                     help="#forge pin post id the fold must cite (SPEC §0 Pin); with --coverage")
     ap.add_argument("--coverage", nargs=2, type=Path, metavar=("SPEC", "DECISIONS"),
                     help="check that closed D-numbers are folded or dropped, both ways (SPEC §0)")
     args = ap.parse_args()
+    args.today_is_default = args.today is None
+    if args.today_is_default:
+        args.today = run_start_date()
     if args.coverage:
         coverage_main(*args.coverage, pin=args.pin)
     if args.receipts_file is None:
@@ -1843,11 +1896,11 @@ def main():
     sidecar = hashlib.sha256(args.receipts_file.read_bytes()).hexdigest()
     print(f"receipts check — {args.receipts_file.name}")
     print(f"  {len(receipts)} receipts, {len(superseded)} superseded, sampling {len(pool)}")
-    for label, row in forks:
+    for label, row in forks + condition_rows(receipts):
         print(f"  [{label}] {row}")
     print(f"  sample: {how}")
     print(f"  from: sidecar sha256 {sidecar}")
-    print(f"  checked: {args.today}, by tools/check.py (SPEC v0.2-draft subset; see its header)")
+    print(f"  checked: {args.today}{' (UTC date when the run started)' if args.today_is_default else ' (--today)'}, by tools/check.py (SPEC v0.2-draft subset; see its header)")
     print("  sampling_warrant: this run licenses nothing about receipts it did not read\n")
 
     failures = 0

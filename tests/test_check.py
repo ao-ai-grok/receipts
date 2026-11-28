@@ -4263,5 +4263,121 @@ class AuthorAsciiFold(unittest.TestCase):
         self.assertNotIn(".casefold(", code)
 
 
+class Section7Nov27(unittest.TestCase):
+    """Kama #forge 2026-11-27, §7: five marks, yes to all, with narrowings."""
+
+    def rb(self, review_by="2026-12-01", **kw):
+        return {**receipt("r-1"), "review_by": review_by, **kw}
+
+    # check date: the UTC date when the run starts, printed in the report
+    def test_default_check_date_is_the_utc_run_start_date(self):
+        import datetime as dt
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("check_under_test", CHECK)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        class Fake(dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                # 1 AM UTC on the 28th is 7 PM on the 27th in Kansas
+                return dt.datetime(2026, 11, 28, 1, 0, tzinfo=dt.timezone.utc).astimezone(tz)
+        mod.datetime = Fake
+        self.assertEqual(mod.run_start_date(), dt.date(2026, 11, 28))
+
+    def test_default_run_prints_the_utc_check_date(self):
+        import datetime as dt
+        with tempfile.TemporaryDirectory() as d:
+            sidecar = Path(d) / "report.md.receipts.jsonl"
+            sidecar.write_text(json.dumps(receipt("r-1")) + "\n")
+            (Path(d) / "raw.txt").write_bytes(RAW)
+            before = dt.datetime.now(dt.timezone.utc).date()
+            p = subprocess.run([sys.executable, str(CHECK), str(sidecar)],
+                               capture_output=True, text=True)
+            after = dt.datetime.now(dt.timezone.utc).date()
+        self.assertTrue(any(f"checked: {x} (UTC date when the run started)" in p.stdout
+                            for x in {before, after}), p.stdout)
+
+    def test_today_flag_is_labelled(self):
+        self.assertIn("checked: 2026-09-27 (--today)", run([receipt("r-1")]).stdout)
+
+    # review_by that is not a real date is an error naming line and field
+    def test_review_by_not_a_calendar_date_names_line_and_field(self):
+        for bad in ("2026-02-30", "2026-13-01", "2026-00-10", "2025-02-29", "2026-1-05"):
+            p = run([receipt("r-0"), self.rb(bad, id="r-1")])
+            self.assertEqual(p.returncode, 1, bad)
+            self.assertIn(f"receipt on line 2 has review_by {bad!r}, not a YYYY-MM-DD date",
+                          p.stderr, bad)
+
+    def test_leap_day_review_by_is_a_date(self):
+        p = run([self.rb("2028-02-29", review_conditions="rerun")])
+        self.assertEqual(p.returncode, 0)
+
+    # conditions: print by default, error under --strict
+    def test_no_conditions_is_a_report_row_by_default(self):
+        cases = {"absent": {}, "empty": {"review_conditions": ""},
+                 "spaces": {"review_conditions": "   "},
+                 }
+        for name, kw in cases.items():
+            p = run([self.rb(**kw)])
+            self.assertIn("  [REVIEW CONDITIONS] line 1: r-1 review_by 2026-12-01: has ",
+                          p.stdout, name)
+            self.assertIn("names no condition", p.stdout.replace("no review_conditions beside it",
+                          "names no condition"), name)
+            self.assertEqual(p.returncode, 0, name)  # a row, not a failing mark
+
+    def test_no_conditions_is_an_error_under_strict(self):
+        for kw in ({}, {"review_conditions": ""}, {"review_conditions": "  "}):
+            p = run([self.rb(**kw)], "--strict")
+            self.assertNotEqual(p.returncode, 0, kw)
+            self.assertIn("error: r-1 (line 1) review_by has ", p.stderr, kw)
+
+    def test_row_says_which_kind(self):
+        self.assertIn('has review_conditions "": it names no condition', run([self.rb(review_conditions="")]).stdout)
+        self.assertIn("of spaces only", run([self.rb(review_conditions=" ")]).stdout)
+
+    def test_pins_a_condition_is_not_a_row_and_no_review_by_needs_none(self):
+        p = run([self.rb(review_conditions="rerun the count")], "--strict")
+        self.assertNotIn("REVIEW CONDITIONS", p.stdout)
+        self.assertEqual(p.returncode, 0)
+        p = run([receipt("r-1")], "--strict")
+        self.assertNotIn("REVIEW CONDITIONS", p.stdout)
+
+    def test_pin_no_second_whitespace_set_nbsp_is_a_condition(self):
+        p = run([self.rb(review_conditions="\u00a0")], "--strict")
+        self.assertNotIn("REVIEW CONDITIONS", p.stdout)
+        self.assertEqual(p.returncode, 0)
+
+    # review recorded: the current view only; a bad supersedes records nothing
+    def test_bad_supersedes_records_no_review(self):
+        old = self.rb("2026-09-01", review_conditions="c")
+        for target in ("r-9", "", "r-2"):  # not in file, no id, its own id
+            p = run([old, receipt("r-2", target)])
+            self.assertIn("[ STALE ] r-1", p.stdout, target)
+            self.assertIn("BAD SUPERSEDES", p.stdout, target)
+
+    def test_good_supersedes_records_a_review(self):
+        old = self.rb("2026-09-01", review_conditions="c")
+        self.assertNotIn("[ STALE ]", run([old, receipt("r-2", "r-1")]).stdout)
+
+    def test_forward_pointer_records_no_review(self):
+        first = {**self.rb("2026-09-01", review_conditions="c"), "supersedes": "r-2"}
+        p = run([first, receipt("r-2")])
+        self.assertIn("[ STALE ] r-1", p.stdout)
+        self.assertIn("an id on a later line", p.stdout)
+
+    def test_stale_reads_the_current_view_only(self):
+        old = self.rb("2026-09-01", review_conditions="c")
+        p = run([old, receipt("r-2", "r-1")], "--all")
+        self.assertNotIn("[ STALE ]", p.stdout)
+        p = run([old, receipt("r-2", "r-1")])
+        self.assertNotIn("[ STALE ]", p.stdout)
+
+    def test_a_review_is_not_any_other_field(self):
+        old = self.rb("2026-09-01", review_conditions="c")
+        later = {**receipt("r-2"), "claim": "reviewed r-1: conditions met", "derivation": "r-1"}
+        self.assertIn("[ STALE ] r-1", run([old, later]).stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
