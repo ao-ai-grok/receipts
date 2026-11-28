@@ -445,8 +445,15 @@ How to read it:
   order means a chain cannot loop; a bad `supersedes` is printed by the
   default run, naming the line, the id and which of the three it is;
   `""` is invalid, not absent; ids match as exact strings (§4.1, §6;
-  `#forge` 2026-11-26). The marks left are for her pass by section, §7
-  next (§12).
+  `#forge` 2026-11-26). She said yes to the 5 in §7, with narrowings:
+  the check date is the UTC date when the run starts, printed in the
+  report (Lume reads it the same way); a `review_by` that is not a real
+  date is an error naming the line and field; conditions are printed by
+  default and an error under `--strict`, `""` or spaces only included;
+  `STALE` reads the current view and a bad `supersedes` records nothing;
+  the not-checked clause stands (`#forge` 2026-11-27). The §6 default
+  sentence is now marked Grok's call, her yes. The marks left are for her
+  pass by section, §9 next (§12).
 - **`#forge` PR edits.** Where Kama (or Lume) agrees a cut on `#forge` and
   says it is a PR edit rather than a new decision, this draft folds the
   cut and cites it as a Kama `#forge` narrowing with the date, marked PR
@@ -1011,8 +1018,10 @@ or names an id on a later line is invalid. Nothing is superseded by it,
 and the checker does not crash. Its writer believes the old claim is
 withdrawn, and it isn't, so the fold goes toward the mark: the default
 run prints it in the check-report, naming the line, the id it named, and
-which of the three it is. It does not fail the run by default; under
-`--strict` it is an error. `"supersedes": ""` names no id: it is invalid
+which of the three it is. **It does not fail the run by default; under
+`--strict` it is an error: Grok's call, Kama's yes** (`#forge`
+2026-11-27: it matches `FORKED`, printed by default, an error under
+`--strict`; not part of her 2026-11-26 credit above). `"supersedes": ""` names no id: it is invalid
 (no id is empty, so it names an id not in the file), not absent. Only
 `null`, or no field at all, is absent. (Printed by default, `""` invalid:
 Kama, `#forge` 2026-11-26.) Ids match as exact strings (§4.1), so a
@@ -1043,24 +1052,38 @@ was promised. (D-008)
   beside it **before** the date arrives. Conditions written afterward always
   pass. A review MUST record which conditions it evaluated. (D-009 b)
 - `review_by` is a calendar date, `YYYY-MM-DD`, with no time of day.
-  (@grok draft)
+  A `review_by` that is not a real calendar date, such as `2026-02-30`,
+  is an error naming the line and the field, as `date` is (§4.1).
+  (Kama, `#forge` 2026-11-27; Lume, no cut.)
 - **Past its date** means the check date is strictly after `review_by`.
-  On the `review_by` date itself the receipt is not `STALE`. (@grok draft)
+  On the `review_by` date itself the receipt is not `STALE`. **The check
+  date is the UTC date when the run starts**, printed in the check-report.
+  Otherwise a run at 11 PM in Kansas and one at 1 AM UTC disagree on
+  `STALE`. (Kama, `#forge` 2026-11-27; Lume's `review_by` reads it the
+  same way, her journal 2026-11-27.)
 - The conditions field is `review_conditions`, a string on the same
-  receipt. A checker MAY warn when `review_by` is present and
-  `review_conditions` is not; `--strict` makes that an error. The checker
-  does not interpret the string. (@grok draft. D-009 b requires the
-  conditions and names no field.)
+  receipt. The checker does not interpret the string. D-009 b requires
+  the conditions and names no field. A `review_by` with no
+  `review_conditions` is printed by default, as a row in the
+  check-report naming the line, and is an error under `--strict`: MAY
+  warn is quieter than D-009 b's MUST, so the fold goes toward the mark.
+  `review_conditions` of `""`, or of U+0020 spaces only, names no
+  condition: it is printed the same way. (Kama, `#forge` 2026-11-27;
+  Lume, no cut.)
 - **What counts as a review recorded.** For `STALE`, a review is recorded
   only when a later receipt (file order, §6) has `supersedes` naming this
-  id. No other field counts. (@grok draft)
+  id. No other field counts. `STALE` reads the current view only (§6): a
+  receipt that is superseded is not `STALE`. A bad `supersedes` records
+  nothing (§6), so it is no review. (Kama, `#forge` 2026-11-27; Lume, no
+  cut.)
 - **What the checker does not check.** "Written before the date" cannot be
   checked from the file: `review_conditions` has no fixing time of its own,
   and the receipt's `date` does not prove the conditions were not written
   after `review_by`. The checker does not check it. "Which conditions the
   review evaluated" cannot be checked either: the superseding receipt has
   no field that lists them. The checker does not check it. (D-009 b states
-  both duties. That they are unchecked is @grok draft.)
+  both duties. That they are unchecked: Kama, `#forge` 2026-11-27, "naming
+  what it can't check is the receipt"; Lume, no cut.)
 - A receipt past its `review_by` date with no review recorded renders
   `STALE`, emitted at the weight of a failing check (§5.5). (D-009, D-009 a)
 
@@ -1557,9 +1580,15 @@ is done: yes to its 2, with narrowings: file order means a chain cannot
 loop; a bad `supersedes` is printed by the default run, naming the line,
 the id it named and which of the three it is; `""` is invalid, not
 absent; ids match as exact strings, no normalization (§4.1) (Kama,
-`#forge` 2026-11-26; Lume, no reply). 34 draft marks remain above §13:
-§0 12, §7 5, §9 1, §11 16; §5, §6, §8, §10 and §12 carry none. §7 is
-next (Kama, `#forge` 2026-11-26), then §9, then §11. The two rows that fold left open
+`#forge` 2026-11-26; Lume, no reply). §7 is done: yes to its 5, with
+narrowings: the check date is the UTC date when the run starts, printed
+in the report; a `review_by` that is not a real date is an error naming
+the line and field; conditions are printed by default, an error under
+`--strict`, `""` or spaces only included; `STALE` reads the current view
+only, and a bad `supersedes` records nothing; the not-checked clause
+stands (Kama, `#forge` 2026-11-27; Lume, no cut). 29 draft marks remain
+above §13: §0 12, §9 1, §11 16; §5, §6, §7, §8, §10 and §12 carry none.
+§9 is next (Kama, `#forge` 2026-11-27), then §11. The two rows that fold left open
 are cut and folded: C1 (U+0080–U+009F, including U+0085), U+2028 and
 U+2029 take the §4.1 control rule, one rule said once; `derivation` is a
 string or absent, anything else an error naming the line and the field,
@@ -2272,6 +2301,26 @@ next.
   A composed é and e plus U+0301 are two ids, so a `supersedes` naming
   one points at nothing if only the other is in the file.
 - §0 / §12: §6 done.
+
+**v0.2-draft, fold Kama `#forge` 2026-11-27, §7 and one §6 sentence (Lume: no cut)**
+
+DECISIONS.md is not edited. All five §7 marks are folded: 29 draft marks
+remain above §13, counted with grep (§0 12, §9 1, §11 16). §9 is next.
+
+- §6: the default sentence (a bad `supersedes` does not fail the run by
+  default; an error under `--strict`) is marked Grok's call with her yes,
+  no longer inside her 2026-11-26 credit.
+- §7 `review_by`: yes, now citing her post. The check date is the UTC
+  date when the run starts, printed in the check-report. Lume's
+  `review_by` reads it the same way. A `review_by` that is not a real
+  calendar date (`2026-02-30`) is an error naming the line and field.
+- §7 conditions: yes, folded toward the mark. A `review_by` with no
+  `review_conditions`, with `""`, or with spaces only is printed by
+  default as a check-report row and is an error under `--strict`.
+- §7 review recorded: yes. `STALE` reads the current view only; a bad
+  `supersedes` records nothing (§6).
+- §7 not-checked clause: yes.
+- §0 / §12: §7 done.
 
 ---
 
